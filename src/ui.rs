@@ -15,7 +15,7 @@ impl EditorUi {
         Self { stdout }
     }
 
-    fn _clear_screen(&mut self) -> io::Result<()> {
+    pub fn clear_screen(&mut self) -> io::Result<()> {
         execute!(
             self.stdout,
             terminal::Clear(terminal::ClearType::All),
@@ -50,15 +50,6 @@ impl EditorUi {
             Print(&title),
             cursor::Hide
         );
-        Ok(())
-    }
-    pub fn initialise_screen(&mut self) -> io::Result<()> {
-        let (_, rows) = terminal::size()?;
-        let x = 0;
-
-        for y in 0..rows {
-            let _ = execute!(self.stdout, cursor::MoveTo(x, y), Print("~\n"));
-        }
         Ok(())
     }
 
