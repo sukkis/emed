@@ -28,6 +28,7 @@ enum EditorCommand {
     MoveUp,
     MoveDown,
     InsertChar(char),
+    InsertNewline,
     //   DeleteChar,
     NoOp,
 }
@@ -87,6 +88,7 @@ fn command_from_event(event: Event, saw_ctrl_x: &mut bool) -> EditorCommand {
         KeyCode::Right => EditorCommand::MoveRight,
         KeyCode::Up => EditorCommand::MoveUp,
         KeyCode::Down => EditorCommand::MoveDown,
+        KeyCode::Enter => EditorCommand::InsertNewline,
         KeyCode::Char(c) if is_plain_text_key(&k) => EditorCommand::InsertChar(c),
         _ => EditorCommand::NoOp,
     }
@@ -117,6 +119,10 @@ fn apply_command(
         EditorCommand::MoveDown => ui.down(state)?,
         EditorCommand::InsertChar(c) => {
             state.insert_char(c);
+            ui.draw_screen(state)?;
+        }
+        EditorCommand::InsertNewline => {
+            state.insert_newline();
             ui.draw_screen(state)?;
         }
         //        EditorCommand::DeleteChar => ,

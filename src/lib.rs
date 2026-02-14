@@ -6,15 +6,39 @@ pub struct EditorState {
     cx: usize,  // cursor column in characters (within the line)
     cy: usize,  // cursor line index
     screen_size: ScreenSize,
+    pub filename: String,
+    pub file_type: FileType,
+    pub help_message: String,
+}
+
+pub enum FileType {
+    Unknown,
+    Text,
+    Binary,
+    C,
+}
+
+impl FileType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FileType::Unknown => "unknown",
+            FileType::Text => "text",
+            FileType::Binary => "binary",
+            FileType::C => "c",
+        }
+    }
 }
 
 impl EditorState {
     pub fn new(screen_size: ScreenSize) -> Self {
         Self {
-            text: Rope::from_str("hello\nworld\n"),
+            text: Rope::new(),
             cx: 0,
             cy: 0,
             screen_size,
+            filename: "-".to_string(),
+            file_type: FileType::Unknown,
+            help_message: "HELP: C-x C-c to quit".to_string(),
         }
     }
 
@@ -26,6 +50,15 @@ impl EditorState {
         self.text.insert_char(index, c);
         self.cx += 1;
     }
+
+    pub fn insert_newline(&mut self) {
+        let ropey_line_start = self.text.line_to_char(self.cy);
+        let index = ropey_line_start + self.cx;
+        self.text.insert_char(index, '\n');
+        self.cy += 1;
+        self.cx = 0;
+    }
+
     pub fn set_screen_size(&mut self, screen_size: ScreenSize) {
         self.screen_size = screen_size;
     }
@@ -84,6 +117,14 @@ impl EditorState {
         len
     }
 
+    /// Total number of Unicode scalar values (`char`s) in the buffer.
+    ///
+    /// Note: this is *not* the same as bytes, and not the same as grapheme clusters.
+    /// It's consistent with how the editor currently measures cursor movement and line lengths.
+    pub fn char_count(&self) -> usize {
+        self.text.len_chars()
+    }
+
     pub fn line_as_string(&self, line_index: usize) -> String {
         self.text.line(line_index).to_string()
     }
@@ -92,7 +133,6 @@ impl EditorState {
         self.text.len_lines() - 1
     }
 }
-
 
 #[cfg(test)]
 mod tests {

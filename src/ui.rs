@@ -1,4 +1,4 @@
-use crate::{VERSION};
+use crate::VERSION;
 use crossterm::style::{
     Attribute, Color, Print, SetAttribute, SetBackgroundColor, SetForegroundColor,
 };
@@ -55,21 +55,59 @@ impl EditorUi {
 
     pub fn initialise_editing(&mut self) -> io::Result<()> {
         self.set_colour_scheme()?;
-        let _ = execute!(
+        execute!(
             self.stdout,
             cursor::MoveTo(0, 0),
             terminal::Clear(terminal::ClearType::CurrentLine),
             cursor::Show
-        );
+        )?;
         Ok(())
     }
 
     pub fn set_colour_scheme(&mut self) -> io::Result<()> {
-        let _ = execute!(
+        execute!(
             self.stdout,
             SetBackgroundColor(Color::Black),
             SetForegroundColor(Color::Magenta)
+        )?;
+        Ok(())
+    }
+    // two last rows are for status information and help.
+    // the lowest one is help, status is shown above it
+    pub fn update_status_information(&mut self, state: &EditorState) -> io::Result<()> {
+        let (cols, rows) = terminal::size()?;
+        let filetype_str = state.file_type.as_str();
+        if rows < 2 {
+            return Ok(()); // two small screen to show status
+        }
+        let status_y = rows - 2;
+        let help_y = rows - 1;
+
+        let filetype_str = state.file_type.as_str();
+
+        let status_message = format!(
+            "{}: {} lines, {} chars",
+            filetype_str,
+            state.index_of_last_line() + 1,
+            state.char_count()
         );
+
+        execute!(
+            self.stdout,
+            cursor::MoveTo(0, status_y),
+            terminal::Clear(terminal::ClearType::CurrentLine),
+            SetAttribute(Attribute::Reverse),
+            SetAttribute(Attribute::Bold),
+            Print(fit_to_width(&status_message, cols as usize)),
+            SetAttribute(Attribute::Reset),
+            cursor::MoveTo(0, help_y),
+            terminal::Clear(terminal::ClearType::CurrentLine),
+            Print(fit_to_width(&state.help_message, cols as usize)),
+        )?;
+
+        // Re-assert base theme so the rest of the editor stays "pink on black".
+        self.set_colour_scheme()?;
+
         Ok(())
     }
 
@@ -95,9 +133,11 @@ impl EditorUi {
             execute!(self.stdout, cursor::MoveTo(0, y as u16), Print(line))?;
         }
 
-        for y in visible..max_rows {
+        for y in visible..max_rows - 2 {
             execute!(self.stdout, cursor::MoveTo(0, y as u16), Print("~"))?;
         }
+
+        self.update_status_information(state)?;
 
         self.move_cursor_to(state)?;
         Ok(())
@@ -132,6 +172,17 @@ impl EditorUi {
     }
 }
 
+// helper functions
+
 fn to_u16(n: usize) -> u16 {
     u16::try_from(n).unwrap_or(u16::MAX)
+}
+
+fn fit_to_width(s: &str, width: usize) -> String {
+    let mut out: String = s.chars().take(width).collect();
+    let len = out.chars().count();
+    if len < width {
+        out.extend(std::iter::repeat(' ').take(width - len));
+    }
+    out
 }
