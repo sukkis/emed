@@ -1,82 +1,61 @@
-use crossterm::event::{KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{KeyEventKind, KeyModifiers};
 use crossterm::{
     event::{Event, KeyCode, read},
     terminal,
 };
 use std::io::{self};
 
-use emed_core::{EditorState, EditorCommand};
+use emed_core::{EditorCommand, EditorState, InputKey, command_from_key};
 mod ui;
 use ui::EditorUi;
 
 const VERSION: &str = "0.0.1";
 
+// Convert crossterm events into a simplified, editor-owned input representation.
+// This keeps `crossterm` types out of the core editor logic and makes keybinding logic testable.
+fn to_input_key(event: Event) -> Option<InputKey> {
+    let Event::Key(k) = event else {
+        return None;
+    };
 
-/// - Prevent "control chords" (Ctrl+something, Alt+something) from being inserted as text.
-/// - Only treat actual character keys as text when the user is typing normally.
-fn is_plain_text_key(k: &KeyEvent) -> bool {
-    k.kind == KeyEventKind::Press
-        && !k.modifiers.contains(KeyModifiers::CONTROL)
-        && !k.modifiers.contains(KeyModifiers::ALT)
+    if k.kind != KeyEventKind::Press {
+        return None;
+    }
+
+    let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = k.modifiers.contains(KeyModifiers::ALT);
+
+    match k.code {
+        KeyCode::Left => Some(InputKey::Left),
+        KeyCode::Right => Some(InputKey::Right),
+        KeyCode::Up => Some(InputKey::Up),
+        KeyCode::Down => Some(InputKey::Down),
+        KeyCode::Enter => Some(InputKey::Enter),
+        KeyCode::Backspace => Some(InputKey::Backspace),
+        KeyCode::Delete => Some(InputKey::Delete),
+
+        // Characters: distinguish plain typing from control chords.
+        KeyCode::Char(c) if ctrl => Some(InputKey::Ctrl(c)),
+
+        // Ignore Alt-modified chars for now (often Meta / compose / terminal shortcuts).
+        KeyCode::Char(_c) if alt => None,
+
+        KeyCode::Char(c) => Some(InputKey::Char(c)),
+
+        _ => None,
+    }
 }
 
 /// Converts a raw terminal `Event` into an `EditorCommand`.
 ///
-/// Intent:
-/// - Centralize all keybinding decisions in one place.
-/// - Keep the rest of the program from caring about `crossterm` details.
-/// - Implement multi-key "chords" such as Emacs-style `Ctrl+X` then `Ctrl+C`.
-///
-/// How it fits together:
-/// - The main loop calls this for each incoming event.
-/// - The `saw_ctrl_x` flag is *state across events*: it remembers whether the previous keypress
-///   was `Ctrl+X`, so we can interpret the *next* keypress accordingly.
-/// - The returned `EditorCommand` is then handed to `apply_command()`.
+/// This is now a thin adapter:
+/// `crossterm::Event` → `InputKey` → `EditorCommand` (via emed_core).
 fn command_from_event(event: Event, saw_ctrl_x: &mut bool) -> EditorCommand {
-    let Event::Key(k) = event else {
+    let Some(key) = to_input_key(event) else {
         return EditorCommand::NoOp;
     };
 
-    if k.kind != KeyEventKind::Press {
-        return EditorCommand::NoOp;
-    }
-    // Quit on Ctrl-Q. Alternative to C-x C-c.
-    if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('q') {
-        return EditorCommand::Quit;
-    }
-
-    // Ctrl-x prefix handling (Emacs-style chord starter).
-    // If we see Ctrl+X, we "arm" the prefix and consume this keypress.
-    let is_ctrl_x = k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('x');
-    if is_ctrl_x {
-        *saw_ctrl_x = true;
-        return EditorCommand::NoOp;
-    }
-
-    // If a Ctrl+X prefix was armed by the previous keypress, interpret this key as the second half
-    // of the chord and then clear the prefix.
-    if *saw_ctrl_x {
-        *saw_ctrl_x = false;
-        let is_ctrl_c = k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c');
-        if is_ctrl_c {
-            return EditorCommand::Quit;
-        } else {
-            return EditorCommand::NoOp;
-        }
-    }
-
-    // Normal (non-chord) bindings: movement + plain text insertion.
-    match k.code {
-        KeyCode::Left => EditorCommand::MoveLeft,
-        KeyCode::Right => EditorCommand::MoveRight,
-        KeyCode::Up => EditorCommand::MoveUp,
-        KeyCode::Down => EditorCommand::MoveDown,
-        KeyCode::Enter => EditorCommand::InsertNewline,
-        KeyCode::Delete => EditorCommand::DeleteChar,
-        KeyCode::Backspace => EditorCommand::Backspace,
-        KeyCode::Char(c) if is_plain_text_key(&k) => EditorCommand::InsertChar(c),
-        _ => EditorCommand::NoOp,
-    }
+    command_from_key(key, saw_ctrl_x)
 }
 
 /// Executes an `EditorCommand`.

@@ -15,12 +15,16 @@ pub struct EditorState {
 /// High-level actions the editor understands.
 ///
 /// Intent:
-/// - Keep terminal input (`crossterm::Event`) out of the editor core logic.
-/// - Make the main loop a simple "read event -> translate -> apply" pipeline.
+/// - Provide a small, stable “vocabulary” of editor operations (move, insert, delete, quit).
+/// - Keep the core editor logic (state mutations + keybinding decisions) independent of any
+///   particular terminal/input backend.
 ///
 /// How it fits together:
-/// - `command_from_event()` translates raw input events into one of these commands.
-/// - `apply_command()` performs the command by mutating `EditorState` and/or redrawing via `EditorUi`.
+/// - The binary crate (src/main.rs) reads input (currently via `crossterm`) and translates it
+///   into an `EditorCommand`.
+/// - The core library can also translate simplified input (`InputKey`) into an `EditorCommand`
+///   via `EditorState::command_from_key(...)`. This path is deliberately easy to unit-test.
+/// - Executing a command typically means: mutate `EditorState`, then ask the UI to redraw.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorCommand {
     Quit,
@@ -69,45 +73,7 @@ impl EditorState {
         }
     }
 
-    // command logic
 
-    /// Translate a simplified input key into an editor command.
-    ///
-    /// This function is deliberately pure (except for the `saw_ctrl_x` flag),
-    /// so we can unit-test keybindings like Ctrl+X then Ctrl+C without involving crossterm.
-    pub fn command_from_key(key: InputKey, saw_ctrl_x: &mut bool) -> EditorCommand {
-        // Quit on Ctrl-Q. Alternative to C-x C-c.
-        if key == InputKey::Ctrl('q') {
-            *saw_ctrl_x = false;
-            return EditorCommand::Quit;
-        }
-
-        // Ctrl-X prefix handling.
-        if key == InputKey::Ctrl('x') {
-            *saw_ctrl_x = true;
-            return EditorCommand::NoOp;
-        }
-
-        if *saw_ctrl_x {
-            *saw_ctrl_x = false;
-            return match key {
-                InputKey::Ctrl('c') => EditorCommand::Quit,
-                _ => EditorCommand::NoOp,
-            };
-        }
-
-        match key {
-            InputKey::Left => EditorCommand::MoveLeft,
-            InputKey::Right => EditorCommand::MoveRight,
-            InputKey::Up => EditorCommand::MoveUp,
-            InputKey::Down => EditorCommand::MoveDown,
-            InputKey::Enter => EditorCommand::InsertNewline,
-            InputKey::Delete => EditorCommand::DeleteChar,
-            InputKey::Backspace => EditorCommand::Backspace,
-            InputKey::Char(c) => EditorCommand::InsertChar(c),
-            InputKey::Ctrl(_) => EditorCommand::NoOp,
-        }
-    }
 
     // scrolling
 
@@ -306,6 +272,47 @@ impl EditorState {
     /// Test helper: return the whole buffer as a `String` (for easy assertions).
     fn buffer_as_string_for_test(&self) -> String {
         self.text.to_string()
+    }
+}
+
+
+
+
+/// Translate a simplified input key into an editor command.
+///
+/// This function is deliberately pure (except for the `saw_ctrl_x` flag),
+/// so we can unit-test keybindings like Ctrl+X then Ctrl+C without involving crossterm.
+pub fn command_from_key(key: InputKey, saw_ctrl_x: &mut bool) -> EditorCommand {
+    // Quit on Ctrl-Q. Alternative to C-x C-c.
+    if key == InputKey::Ctrl('q') {
+        *saw_ctrl_x = false;
+        return EditorCommand::Quit;
+    }
+
+    // Ctrl-X prefix handling.
+    if key == InputKey::Ctrl('x') {
+        *saw_ctrl_x = true;
+        return EditorCommand::NoOp;
+    }
+
+    if *saw_ctrl_x {
+        *saw_ctrl_x = false;
+        return match key {
+            InputKey::Ctrl('c') => EditorCommand::Quit,
+            _ => EditorCommand::NoOp,
+        };
+    }
+
+    match key {
+        InputKey::Left => EditorCommand::MoveLeft,
+        InputKey::Right => EditorCommand::MoveRight,
+        InputKey::Up => EditorCommand::MoveUp,
+        InputKey::Down => EditorCommand::MoveDown,
+        InputKey::Enter => EditorCommand::InsertNewline,
+        InputKey::Delete => EditorCommand::DeleteChar,
+        InputKey::Backspace => EditorCommand::Backspace,
+        InputKey::Char(c) => EditorCommand::InsertChar(c),
+        InputKey::Ctrl(_) => EditorCommand::NoOp,
     }
 }
 
