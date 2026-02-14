@@ -7,9 +7,17 @@ use std::io::{self};
 
 use emed_core::{EditorCommand, EditorState, InputKey, command_from_key};
 mod ui;
+use clap::Parser;
+use std::path::PathBuf;
 use ui::EditorUi;
-
 const VERSION: &str = "0.0.1";
+
+#[derive(Parser, Debug)]
+#[command(name = "emed", version = VERSION)]
+struct Args {
+    /// File to open
+    file: Option<PathBuf>,
+}
 
 // Convert crossterm events into a simplified, editor-owned input representation.
 // This keeps `crossterm` types out of the core editor logic and makes keybinding logic testable.
@@ -103,6 +111,7 @@ fn apply_command(
 }
 
 fn main() -> io::Result<()> {
+    let args = Args::parse();
     let stdout = io::stdout();
     let mut ui = EditorUi::new(stdout);
 
@@ -114,6 +123,13 @@ fn main() -> io::Result<()> {
 
     let screen_size = terminal::size()?;
     let mut state = EditorState::new(screen_size);
+
+    // If we have an argument, load the file.
+    if let Some(path) = args.file.as_deref() {
+        let contents = std::fs::read_to_string(path)?;
+        state.load_document(&contents, path.to_str());
+    }
+
     ui.draw_screen(&state)?;
 
     let mut saw_ctrl_x = false;

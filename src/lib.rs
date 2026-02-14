@@ -1,4 +1,5 @@
 use ropey::{Rope, RopeSlice};
+use std::path::Path;
 
 pub type ScreenSize = (u16, u16);
 pub struct EditorState {
@@ -56,6 +57,7 @@ pub enum FileType {
     Text,
     Binary,
     C,
+    Rust,
 }
 
 impl FileType {
@@ -65,6 +67,7 @@ impl FileType {
             FileType::Text => "text",
             FileType::Binary => "binary",
             FileType::C => "c",
+            FileType::Rust => "Rust file",
         }
     }
 }
@@ -94,6 +97,26 @@ impl EditorState {
             file_type: FileType::Unknown,
             help_message: "HELP: C-x C-c OR Ctrl-Q to quit".to_string(),
         }
+    }
+
+    /// Replace the entire buffer with `contents` and update metadata.
+    ///
+    /// Pure operation: no file system access; caller provides the contents.
+    pub fn load_document(&mut self, contents: &str, filename: Option<&str>) {
+        self.text = Rope::from_str(contents);
+
+        if let Some(name) = filename {
+            self.filename = name.to_string();
+            self.file_type = file_type_from_filename(name);
+        } else {
+            self.filename = "-".to_string();
+            self.file_type = FileType::Unknown;
+        }
+
+        self.cx = 0;
+        self.cy = 0;
+        self.row_offset = 0;
+        self.ensure_cursor_visible();
     }
 
     /// Apply an `EditorCommand` to `EditorState` (no UI, no IO).
@@ -320,6 +343,15 @@ impl EditorState {
 
     pub fn index_of_last_line(&self) -> usize {
         self.text.len_lines() - 1
+    }
+}
+
+fn file_type_from_filename(name: &str) -> FileType {
+    let path = Path::new(name);
+    match path.extension().and_then(|s| s.to_str()) {
+        Some("rs") => FileType::Rust,
+        Some(_) => FileType::Text,
+        None => FileType::Unknown,
     }
 }
 
