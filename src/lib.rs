@@ -39,7 +39,17 @@ pub enum EditorCommand {
     NoOp,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InputKey { Char(char), Enter, Backspace, Delete, Left, Right, Up, Down, Ctrl(char) }
+pub enum InputKey {
+    Char(char),
+    Enter,
+    Backspace,
+    Delete,
+    Left,
+    Right,
+    Up,
+    Down,
+    Ctrl(char),
+}
 
 pub enum FileType {
     Unknown,
@@ -59,6 +69,19 @@ impl FileType {
     }
 }
 
+/// Result of applying an `EditorCommand` to the editor state.
+///
+/// This is intentionally UI-agnostic: the binary can decide whether/how to redraw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplyResult {
+    /// No visible state change (no redraw needed).
+    NoChange,
+    /// State changed (redraw recommended).
+    Changed,
+    /// Request to quit the application.
+    Quit,
+}
+
 impl EditorState {
     pub fn new(screen_size: ScreenSize) -> Self {
         Self {
@@ -73,7 +96,51 @@ impl EditorState {
         }
     }
 
+    /// Apply an `EditorCommand` to `EditorState` (no UI, no IO).
+    ///
+    /// This is useful for end-to-end style core tests:
+    /// `InputKey` → `EditorCommand` → `EditorState`.
+    pub fn apply_command(&mut self, cmd: EditorCommand) -> ApplyResult {
+        match cmd {
+            EditorCommand::Quit => ApplyResult::Quit,
 
+            EditorCommand::MoveLeft => {
+                self.cursor_left();
+                ApplyResult::Changed
+            }
+            EditorCommand::MoveRight => {
+                self.cursor_right();
+                ApplyResult::Changed
+            }
+            EditorCommand::MoveUp => {
+                self.cursor_up();
+                ApplyResult::Changed
+            }
+            EditorCommand::MoveDown => {
+                self.cursor_down();
+                ApplyResult::Changed
+            }
+
+            EditorCommand::InsertChar(c) => {
+                self.insert_char(c);
+                ApplyResult::Changed
+            }
+            EditorCommand::InsertNewline => {
+                self.insert_newline();
+                ApplyResult::Changed
+            }
+            EditorCommand::DeleteChar => {
+                self.delete_char();
+                ApplyResult::Changed
+            }
+            EditorCommand::Backspace => {
+                self.backspace();
+                ApplyResult::Changed
+            }
+
+            EditorCommand::NoOp => ApplyResult::NoChange,
+        }
+    }
 
     // scrolling
 
@@ -274,9 +341,6 @@ impl EditorState {
         self.text.to_string()
     }
 }
-
-
-
 
 /// Translate a simplified input key into an editor command.
 ///
