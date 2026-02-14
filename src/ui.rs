@@ -182,7 +182,7 @@ fn fit_to_width(s: &str, width: usize) -> String {
     let mut out: String = s.chars().take(width).collect();
     let len = out.chars().count();
     if len < width {
-        out.extend(std::iter::repeat(' ').take(width - len));
+        out.extend(std::iter::repeat_n(' ', width - len));
     }
     out
 }

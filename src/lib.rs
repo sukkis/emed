@@ -38,7 +38,7 @@ impl EditorState {
             screen_size,
             filename: "-".to_string(),
             file_type: FileType::Unknown,
-            help_message: "HELP: C-x C-c to quit".to_string(),
+            help_message: "HELP: C-x C-c OR Ctrl-Q to quit".to_string(),
         }
     }
 

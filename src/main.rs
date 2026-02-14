@@ -62,6 +62,12 @@ fn command_from_event(event: Event, saw_ctrl_x: &mut bool) -> EditorCommand {
         return EditorCommand::NoOp;
     }
 
+    // Quit on Ctrl-Q. Alternative to C-x C-c.
+    if k.kind == KeyEventKind::Press
+        && k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('q') {
+        return EditorCommand::Quit;
+    }
+
     // Ctrl-x prefix handling (Emacs-style chord starter).
     // If we see Ctrl+X, we "arm" the prefix and consume this keypress.
     let is_ctrl_x = k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('x');
