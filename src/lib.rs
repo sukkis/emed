@@ -12,6 +12,31 @@ pub struct EditorState {
     pub help_message: String,
 }
 
+/// High-level actions the editor understands.
+///
+/// Intent:
+/// - Keep terminal input (`crossterm::Event`) out of the editor core logic.
+/// - Make the main loop a simple "read event -> translate -> apply" pipeline.
+///
+/// How it fits together:
+/// - `command_from_event()` translates raw input events into one of these commands.
+/// - `apply_command()` performs the command by mutating `EditorState` and/or redrawing via `EditorUi`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorCommand {
+    Quit,
+    MoveLeft,
+    MoveRight,
+    MoveUp,
+    MoveDown,
+    InsertChar(char),
+    InsertNewline,
+    DeleteChar,
+    Backspace,
+    NoOp,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputKey { Char(char), Enter, Backspace, Delete, Left, Right, Up, Down, Ctrl(char) }
+
 pub enum FileType {
     Unknown,
     Text,
@@ -41,6 +66,46 @@ impl EditorState {
             filename: "-".to_string(),
             file_type: FileType::Unknown,
             help_message: "HELP: C-x C-c OR Ctrl-Q to quit".to_string(),
+        }
+    }
+
+    // command logic
+
+    /// Translate a simplified input key into an editor command.
+    ///
+    /// This function is deliberately pure (except for the `saw_ctrl_x` flag),
+    /// so we can unit-test keybindings like Ctrl+X then Ctrl+C without involving crossterm.
+    pub fn command_from_key(key: InputKey, saw_ctrl_x: &mut bool) -> EditorCommand {
+        // Quit on Ctrl-Q. Alternative to C-x C-c.
+        if key == InputKey::Ctrl('q') {
+            *saw_ctrl_x = false;
+            return EditorCommand::Quit;
+        }
+
+        // Ctrl-X prefix handling.
+        if key == InputKey::Ctrl('x') {
+            *saw_ctrl_x = true;
+            return EditorCommand::NoOp;
+        }
+
+        if *saw_ctrl_x {
+            *saw_ctrl_x = false;
+            return match key {
+                InputKey::Ctrl('c') => EditorCommand::Quit,
+                _ => EditorCommand::NoOp,
+            };
+        }
+
+        match key {
+            InputKey::Left => EditorCommand::MoveLeft,
+            InputKey::Right => EditorCommand::MoveRight,
+            InputKey::Up => EditorCommand::MoveUp,
+            InputKey::Down => EditorCommand::MoveDown,
+            InputKey::Enter => EditorCommand::InsertNewline,
+            InputKey::Delete => EditorCommand::DeleteChar,
+            InputKey::Backspace => EditorCommand::Backspace,
+            InputKey::Char(c) => EditorCommand::InsertChar(c),
+            InputKey::Ctrl(_) => EditorCommand::NoOp,
         }
     }
 
@@ -307,5 +372,90 @@ mod tests {
         state.set_cursor(3, 2); // XYZ| (end of buffer)
         state.delete_char();
         assert_eq!(state.buffer_as_string_for_test(), "ab\nce\nXYZ");
+    }
+
+    #[test]
+    fn delete_char_at_end_of_line_joins_lines_when_not_last_line() {
+        let mut state = EditorState::new((80, 24));
+        state.set_buffer_for_test("ab\ncd\n");
+
+        state.set_cursor(2, 0); // ab|<newline>
+        state.delete_char(); // deletes '\n' => joins "cd" onto "ab"
+
+        assert_eq!(state.buffer_as_string_for_test(), "abcd\n");
+        assert_eq!(state.cursor_pos(), (2, 0)); // cursor stays at join point
+    }
+
+    #[test]
+    fn backspace_in_middle_deletes_previous_char_and_moves_left() {
+        let mut state = EditorState::new((80, 24));
+        state.set_buffer_for_test("ab\n");
+
+        state.set_cursor(2, 0); // ab|
+        state.backspace(); // deletes 'b'
+
+        assert_eq!(state.buffer_as_string_for_test(), "a\n");
+        assert_eq!(state.cursor_pos(), (1, 0));
+    }
+
+    #[test]
+    fn backspace_at_start_of_line_merges_with_previous_line() {
+        let mut state = EditorState::new((80, 24));
+        state.set_buffer_for_test("ab\ncd\n");
+
+        state.set_cursor(0, 1); // |cd
+        state.backspace(); // merges lines by deleting the newline after "ab"
+
+        assert_eq!(state.buffer_as_string_for_test(), "abcd\n");
+        assert_eq!(state.cursor_pos(), (2, 0)); // end of previous line
+    }
+
+    #[test]
+    fn cursor_up_and_down_clamp_cx_to_line_length() {
+        let mut state = EditorState::new((80, 24));
+        state.set_buffer_for_test("longline\nshrt\nlongline\n");
+
+        state.set_cursor(7, 0); // longlin|e (cx=7)
+        state.cursor_down(); // onto "shrt" (len 4), cx should clamp to 4
+
+        assert_eq!(state.cursor_pos(), (4, 1));
+
+        state.cursor_down(); // back onto "longline", cx should remain 4
+        assert_eq!(state.cursor_pos(), (4, 2));
+    }
+
+    #[test]
+    fn ensure_cursor_visible_scrolls_down_when_cursor_moves_below_viewport() {
+        // screen_size rows=4 => text area height = 2 (rows - 2)
+        let mut state = EditorState::new((80, 4));
+        state.set_buffer_for_test("0\n1\n2\n3\n4\n");
+
+        state.set_cursor(0, 0);
+        state.ensure_cursor_visible();
+        assert_eq!(state.row_offset(), 0);
+
+        state.set_cursor(0, 2); // cy=2 should not fit into viewport [0..2)
+        state.ensure_cursor_visible();
+        assert_eq!(state.row_offset(), 1); // cy + 1 - height = 2 + 1 - 2 = 1
+
+        state.set_cursor(0, 4);
+        state.ensure_cursor_visible();
+        assert_eq!(state.row_offset(), 3); // 4 + 1 - 2 = 3
+    }
+
+    #[test]
+    fn ensure_cursor_visible_scrolls_up_when_cursor_moves_above_viewport() {
+        let mut state = EditorState::new((80, 4)); // text height = 2
+        state.set_buffer_for_test("0\n1\n2\n3\n4\n");
+
+        // Pretend we've scrolled down
+        state.set_cursor(0, 4);
+        state.ensure_cursor_visible();
+        assert_eq!(state.row_offset(), 3);
+
+        // Now move cursor back above the viewport; offset should follow up.
+        state.set_cursor(0, 1);
+        state.ensure_cursor_visible();
+        assert_eq!(state.row_offset(), 1);
     }
 }

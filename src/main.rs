@@ -5,34 +5,12 @@ use crossterm::{
 };
 use std::io::{self};
 
-use emed_core::EditorState;
+use emed_core::{EditorState, EditorCommand};
 mod ui;
 use ui::EditorUi;
 
 const VERSION: &str = "0.0.1";
 
-/// High-level actions the editor understands.
-///
-/// Intent:
-/// - Keep terminal input (`crossterm::Event`) out of the editor core logic.
-/// - Make the main loop a simple "read event -> translate -> apply" pipeline.
-///
-/// How it fits together:
-/// - `command_from_event()` translates raw input events into one of these commands.
-/// - `apply_command()` performs the command by mutating `EditorState` and/or redrawing via `EditorUi`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EditorCommand {
-    Quit,
-    MoveLeft,
-    MoveRight,
-    MoveUp,
-    MoveDown,
-    InsertChar(char),
-    InsertNewline,
-    DeleteChar,
-    Backspace,
-    NoOp,
-}
 
 /// - Prevent "control chords" (Ctrl+something, Alt+something) from being inserted as text.
 /// - Only treat actual character keys as text when the user is typing normally.
