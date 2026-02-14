@@ -93,6 +93,7 @@ impl EditorState {
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;

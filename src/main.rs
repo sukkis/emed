@@ -3,14 +3,15 @@ use crossterm::style::{Attribute, SetAttribute};
 use crossterm::{
     cursor,
     event::{Event, KeyCode, read},
-    execute, queue,
-    style::{Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor},
+    execute,
+    style::{Color, Print, SetBackgroundColor, SetForegroundColor},
     terminal,
 };
-use std::io::{self, Write};
+use std::io::{self};
 
 use emed_core::EditorState;
-
+mod ui;
+use ui::EditorUi;
 const VERSION: &str = "0.0.1";
 
 /* helper functions */
@@ -214,18 +215,6 @@ fn main() -> io::Result<()> {
         }
     }
 
-    let _ = clean_up(&mut stdout);
-    Ok(())
-}
-
-fn clean_up(stdout: &mut io::Stdout) -> io::Result<()> {
-    terminal::disable_raw_mode()?;
-    queue!(
-        stdout,
-        ResetColor,
-        terminal::Clear(terminal::ClearType::All),
-        cursor::MoveTo(0, 0)
-    )?;
-    stdout.flush()?;
+    let _ = ui::EditorUi::clean_up(&mut stdout);
     Ok(())
 }
