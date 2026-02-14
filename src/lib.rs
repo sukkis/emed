@@ -66,7 +66,7 @@ impl FileType {
             FileType::Unknown => "unknown",
             FileType::Text => "text",
             FileType::Binary => "binary",
-            FileType::C => "c",
+            FileType::C => "C file",
             FileType::Rust => "Rust file",
         }
     }
@@ -350,6 +350,7 @@ fn file_type_from_filename(name: &str) -> FileType {
     let path = Path::new(name);
     match path.extension().and_then(|s| s.to_str()) {
         Some("rs") => FileType::Rust,
+        Some("c") | Some("h") => FileType::C,
         Some(_) => FileType::Text,
         None => FileType::Unknown,
     }
