@@ -17,7 +17,7 @@ Prerequisites: a recent Rust toolchain.
 
 ## Controls
 
-- `q` — quit
+- `Ctrl+q` — quit
 - `Ctrl+x` then `Ctrl+c` — quit (Emacs-style)
 
 ## Architecture

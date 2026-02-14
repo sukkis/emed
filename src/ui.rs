@@ -112,8 +112,35 @@ impl EditorUi {
     }
 
     pub fn draw_screen(&mut self, state: &EditorState) -> io::Result<()> {
+        // Draw a complete "frame" of the editor.
+        //
+        // Rendering model:
+        // - Full redraw (simple + robust): we clear and repaint the entire terminal every time.
+        // - The bottom 2 rows are reserved for UI chrome:
+        //     * second-to-last row: status bar (reverse video)
+        //     * last row: help / message line
+        //   Everything above those rows is the text viewport.
+        //
+        // Scrolling model:
+        // - `EditorState` keeps the cursor position in *buffer coordinates* (cx, cy), where `cy`
+        //   is the absolute line index in the rope.
+        // - `EditorState` also stores `row_offset`, which is the buffer line shown at screen row 0.
+        //   When the cursor would move off-screen, the state bumps `row_offset` to keep it visible.
+        // - During drawing we map:
+        //     buffer line index = row_offset + screen_y
+        //   so that the viewport "slides" over the buffer.
+        //
+        // Cursor mapping:
+        // - Terminal cursor uses *screen coordinates* (x, y).
+        // - The buffer cursor uses *buffer coordinates* (cx, cy).
+        // - To place the terminal cursor correctly in the viewport we subtract the scroll offset:
+        //     screen_cy = cy - row_offset
+        //   (using `saturating_sub` to avoid underflow if something goes out of sync).
         let (_cols, rows) = terminal::size()?;
-        let number_of_lines = state.index_of_last_line() + 1;
+        // let number_of_lines = state.index_of_last_line() + 1;
+        let max_rows = rows as usize;
+        let text_rows = max_rows.saturating_sub(2);
+        let offset = state.row_offset();
 
         execute!(
             self.stdout,
@@ -121,27 +148,31 @@ impl EditorUi {
             cursor::MoveTo(0, 0)
         )?;
 
-        let max_rows = rows as usize;
-        let visible = number_of_lines.min(max_rows);
-        for y in 0..visible {
-            let mut line = state.line_as_string(y);
-            // remove last unicode scalar of string if it is newline
-            // otherwise you might have extra blank lines or cursor in wrong place
-            if line.ends_with('\n') {
-                line.pop();
-            }
-            execute!(self.stdout, cursor::MoveTo(0, y as u16), Print(line))?;
-        }
+        for screen_y in 0..text_rows {
+            let line_index = offset + screen_y;
 
-        for y in visible..max_rows - 2 {
-            execute!(self.stdout, cursor::MoveTo(0, y as u16), Print("~"))?;
+            if line_index <= state.index_of_last_line() {
+                let mut line = state.line_as_string(line_index);
+                if line.ends_with('\n') {
+                    line.pop();
+                }
+                execute!(self.stdout, cursor::MoveTo(0, screen_y as u16), Print(line))?;
+            } else {
+                execute!(self.stdout, cursor::MoveTo(0, screen_y as u16), Print("~"))?;
+            }
         }
 
         self.update_status_information(state)?;
 
-        self.move_cursor_to(state)?;
+        // Cursor is in buffer coordinates; convert to screen coordinates using the viewport offset.
+        let (cx, cy) = state.cursor_pos();
+        let screen_cy = cy.saturating_sub(offset);
+        execute!(self.stdout, cursor::MoveTo(to_u16(cx), to_u16(screen_cy)))?;
+
         Ok(())
     }
+
+
     //
     // cursor movement functions
     //

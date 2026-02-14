@@ -29,7 +29,8 @@ enum EditorCommand {
     MoveDown,
     InsertChar(char),
     InsertNewline,
-    //   DeleteChar,
+    DeleteChar,
+    Backspace,
     NoOp,
 }
 
@@ -61,10 +62,8 @@ fn command_from_event(event: Event, saw_ctrl_x: &mut bool) -> EditorCommand {
     if k.kind != KeyEventKind::Press {
         return EditorCommand::NoOp;
     }
-
     // Quit on Ctrl-Q. Alternative to C-x C-c.
-    if k.kind == KeyEventKind::Press
-        && k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('q') {
+    if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('q') {
         return EditorCommand::Quit;
     }
 
@@ -95,6 +94,8 @@ fn command_from_event(event: Event, saw_ctrl_x: &mut bool) -> EditorCommand {
         KeyCode::Up => EditorCommand::MoveUp,
         KeyCode::Down => EditorCommand::MoveDown,
         KeyCode::Enter => EditorCommand::InsertNewline,
+        KeyCode::Delete => EditorCommand::DeleteChar,
+        KeyCode::Backspace => EditorCommand::Backspace,
         KeyCode::Char(c) if is_plain_text_key(&k) => EditorCommand::InsertChar(c),
         _ => EditorCommand::NoOp,
     }
@@ -131,7 +132,14 @@ fn apply_command(
             state.insert_newline();
             ui.draw_screen(state)?;
         }
-        //        EditorCommand::DeleteChar => ,
+        EditorCommand::DeleteChar => {
+            state.delete_char();
+            ui.draw_screen(state)?;
+        }
+        EditorCommand::Backspace => {
+            state.backspace();
+            ui.draw_screen(state)?;
+        }
         EditorCommand::NoOp => {}
     }
     Ok(false)
