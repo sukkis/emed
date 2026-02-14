@@ -76,7 +76,6 @@ impl EditorUi {
     // the lowest one is help, status is shown above it
     pub fn update_status_information(&mut self, state: &EditorState) -> io::Result<()> {
         let (cols, rows) = terminal::size()?;
-        let filetype_str = state.file_type.as_str();
         if rows < 2 {
             return Ok(()); // two small screen to show status
         }
@@ -172,15 +171,9 @@ impl EditorUi {
         Ok(())
     }
 
-
     //
     // cursor movement functions
     //
-    pub fn move_cursor_to(&mut self, state: &EditorState) -> io::Result<()> {
-        let (cx, cy) = state.cursor_pos(); // (usize, usize)
-        execute!(self.stdout, cursor::MoveTo(to_u16(cx), to_u16(cy)))?;
-        Ok(())
-    }
 
     pub fn left(&mut self, state: &mut EditorState) -> io::Result<()> {
         state.cursor_left();

@@ -226,6 +226,25 @@ impl EditorState {
 }
 
 #[cfg(test)]
+impl EditorState {
+    /// Test helper: replace the entire buffer with `s` and reset cursor/scroll.
+    ///
+    /// This keeps tests small and readable without exposing `text` publicly.
+    fn set_buffer_for_test(&mut self, s: &str) {
+        self.text = Rope::from_str(s);
+        self.cx = 0;
+        self.cy = 0;
+        self.row_offset = 0;
+        self.ensure_cursor_visible();
+    }
+
+    /// Test helper: return the whole buffer as a `String` (for easy assertions).
+    fn buffer_as_string_for_test(&self) -> String {
+        self.text.to_string()
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     #[test]
@@ -243,5 +262,50 @@ mod tests {
         assert_eq!(number_of_lines, 4);
         assert_eq!(last_index, 3);
         assert_eq!(number_of_lines, last_index + 1);
+    }
+
+    // Small but “feature rich” test text:
+    // - multiple lines
+    // - last line without trailing '\n' (common case)
+    const SAMPLE: &str = "ab\ncde\nXYZ";
+
+    #[test]
+    fn insert_char_inserts_at_cursor_and_advances_cx() {
+        let mut state = EditorState::new((80, 24));
+        state.set_buffer_for_test("ab\n");
+
+        state.set_cursor(1, 0); // a|b
+        state.insert_char('X');
+
+        assert_eq!(state.buffer_as_string_for_test(), "aXb\n");
+        assert_eq!(state.cursor_pos(), (2, 0));
+    }
+
+    #[test]
+    fn insert_newline_splits_line_and_moves_cursor_to_next_line_start() {
+        let mut state = EditorState::new((80, 24));
+        state.set_buffer_for_test("hello");
+
+        state.set_cursor(2, 0); // he|llo
+        state.insert_newline();
+
+        assert_eq!(state.buffer_as_string_for_test(), "he\nllo");
+        assert_eq!(state.cursor_pos(), (0, 1));
+    }
+
+    #[test]
+    fn delete_char_deletes_at_cursor_and_is_noop_at_end_of_buffer() {
+        let mut state = EditorState::new((80, 24));
+        state.set_buffer_for_test(SAMPLE);
+
+        // Delete in the middle of a line: c|de -> ce
+        state.set_cursor(1, 1);
+        state.delete_char();
+        assert_eq!(state.buffer_as_string_for_test(), "ab\nce\nXYZ");
+
+        // Delete at end-of-buffer should be a no-op (and must not panic).
+        state.set_cursor(3, 2); // XYZ| (end of buffer)
+        state.delete_char();
+        assert_eq!(state.buffer_as_string_for_test(), "ab\nce\nXYZ");
     }
 }
