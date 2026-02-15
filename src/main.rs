@@ -207,11 +207,11 @@ fn main() -> io::Result<()> {
 
     terminal::enable_raw_mode()?;
 
-    ui.print_editor_version()?;
-    ui.clear_screen()?;
+    let screen_size = terminal::size()?;
+
+    ui.print_editor_version(screen_size.0, screen_size.1)?;
     ui.initialise_editing()?;
 
-    let screen_size = terminal::size()?;
     let mut state = EditorState::new(screen_size);
 
     // If we have an argument, load the file.

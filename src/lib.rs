@@ -7,6 +7,7 @@ pub struct EditorState {
     cx: usize,         // cursor column in characters (within the line)
     cy: usize,         // cursor line index
     row_offset: usize, // needed for scrolling
+    col_offset: usize, // horizontal scrolling
     screen_size: ScreenSize,
     pub filename: String,
     pub file_type: FileType,
@@ -105,12 +106,40 @@ impl EditorState {
             cx: 0,
             cy: 0,
             row_offset: 0,
+            col_offset: 0,
             screen_size,
             filename: "-".to_string(),
             file_type: FileType::Unknown,
             help_message: "HELP: C-x C-s to Save, C-x C-c to Quit".to_string(),
             prompt_buffer: None,
         }
+    }
+
+    /// Return the fragment of `line_index` that fits into a window of
+    /// `screen_width` columns, starting at the current horizontal offset.
+    ///
+    /// The returned `String` may be shorter than `screen_width`; the UI
+    /// clears the remainder of the line with `Clear(UntilNewLine)`.
+    pub fn get_slice(&self, line_index: usize, screen_width: usize) -> String {
+        // get rope indexes
+        let line_start = self.text.line_to_char(line_index);
+        let line_end = self.text.line_to_char(line_index + 1);
+
+        // rope index with offset
+        let win_start = line_start + self.col_offset;
+
+        // If the window starts past the line, there is nothing to show.
+        if win_start >= line_end {
+            return String::new(); // UI will just clear the row.
+        }
+        let win_end = (win_start + screen_width).min(line_end);
+
+        // slice from start + offset
+        self.text
+            .slice(win_start..win_end)
+            .to_string()
+            .trim_end_matches('\n')
+            .to_string()
     }
 
     // Saving a file step 1, have it as a string that can be written to a file
@@ -192,6 +221,7 @@ impl EditorState {
     /// This is what makes "press Enter on the last visible row" scroll the view:
     /// after `cy` changes, we shift the viewport until `cy` fits in the text area.
     pub fn ensure_cursor_visible(&mut self) {
+        // vertical scrolling
         let height = self.text_area_height();
         if height == 0 {
             self.row_offset = self.cy;
@@ -203,6 +233,21 @@ impl EditorState {
         } else if self.cy >= self.row_offset + height {
             self.row_offset = self.cy + 1 - height;
         }
+
+        // horizontal scrolling
+        let width = self.text_area_width();
+
+        // If the line is shorter than the screen we want to keep col_offset = 0.
+        // Otherwise we slide the viewport so that `cx` lands inside `[col_offset, col_offset+width)`.
+        if width == 0 {
+            self.col_offset = self.cx;
+        } else if self.cx < self.col_offset {
+            // cursor moved left of the visible window
+            self.col_offset = self.cx;
+        } else if self.cx >= self.col_offset + width {
+            // cursor moved right past the right edge
+            self.col_offset = self.cx + 1 - width;
+        }
     }
 
     /// Height of the editable text area (terminal rows minus status + help).
@@ -211,9 +256,18 @@ impl EditorState {
         (rows as usize).saturating_sub(2)
     }
 
+    pub fn text_area_width(&self) -> usize {
+        let (cols, _rows) = self.screen_size;
+        cols as usize
+    }
+
     /// The first buffer line currently visible at the top of the screen.
     pub fn row_offset(&self) -> usize {
         self.row_offset
+    }
+
+    pub fn col_offset(&self) -> usize {
+        self.col_offset
     }
 
     // character operations

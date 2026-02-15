@@ -2,7 +2,7 @@ use crate::VERSION;
 use crossterm::style::{
     Attribute, Color, Print, SetAttribute, SetBackgroundColor, SetForegroundColor,
 };
-use crossterm::{cursor, execute, queue, style::ResetColor, terminal};
+use crossterm::{cursor, queue, style::ResetColor, terminal};
 use emed_core::EditorState;
 use std::io;
 use std::io::{Stdout, Write};
@@ -13,15 +13,6 @@ pub struct EditorUi {
 impl EditorUi {
     pub fn new(stdout: Stdout) -> Self {
         Self { stdout }
-    }
-
-    pub fn clear_screen(&mut self) -> io::Result<()> {
-        execute!(
-            self.stdout,
-            terminal::Clear(terminal::ClearType::All),
-            cursor::MoveTo(0, 0)
-        )?;
-        Ok(())
     }
 
     pub fn clean_up(&mut self) -> io::Result<()> {
@@ -37,11 +28,10 @@ impl EditorUi {
         Ok(())
     }
 
-    pub fn print_editor_version(&mut self) -> io::Result<()> {
-        let (cols, rows) = terminal::size()?;
+    pub fn print_editor_version(&mut self, cols: u16, rows: u16) -> io::Result<()> {
         let title = format!("EMED editor version {}", VERSION);
         let chars = title.chars().count();
-        let _ = execute!(
+        let _ = queue!(
             self.stdout,
             SetBackgroundColor(Color::Black),
             SetForegroundColor(Color::Magenta),
@@ -54,9 +44,12 @@ impl EditorUi {
     }
 
     pub fn initialise_editing(&mut self) -> io::Result<()> {
-        self.set_colour_scheme()?;
-        execute!(
+        queue!(
             self.stdout,
+            // black on pink theme
+            SetBackgroundColor(Color::Black),
+            SetForegroundColor(Color::Magenta),
+            // clear and move cursor to right place
             cursor::MoveTo(0, 0),
             terminal::Clear(terminal::ClearType::CurrentLine),
             cursor::Show
@@ -64,18 +57,14 @@ impl EditorUi {
         Ok(())
     }
 
-    pub fn set_colour_scheme(&mut self) -> io::Result<()> {
-        execute!(
-            self.stdout,
-            SetBackgroundColor(Color::Black),
-            SetForegroundColor(Color::Magenta)
-        )?;
-        Ok(())
-    }
     // two last rows are for status information and help.
     // the lowest one is help, status is shown above it
-    pub fn update_status_information(&mut self, state: &EditorState) -> io::Result<()> {
-        let (cols, rows) = terminal::size()?;
+    pub fn queue_status_information(
+        &mut self,
+        state: &EditorState,
+        cols: u16,
+        rows: u16,
+    ) -> io::Result<()> {
         if rows < 2 {
             return Ok(()); // two small screen to show status
         }
@@ -99,7 +88,7 @@ impl EditorUi {
             state.help_message.clone()
         };
 
-        execute!(
+        queue!(
             self.stdout,
             cursor::MoveTo(0, status_y),
             terminal::Clear(terminal::ClearType::CurrentLine),
@@ -113,7 +102,11 @@ impl EditorUi {
         )?;
 
         // Re-assert base theme so the rest of the editor stays "pink on black".
-        self.set_colour_scheme()?;
+        queue!(
+            self.stdout,
+            SetBackgroundColor(Color::Black),
+            SetForegroundColor(Color::Magenta),
+        )?;
 
         Ok(())
     }
@@ -143,38 +136,59 @@ impl EditorUi {
         // - To place the terminal cursor correctly in the viewport we subtract the scroll offset:
         //     screen_cy = cy - row_offset
         //   (using `saturating_sub` to avoid underflow if something goes out of sync).
-        let (_cols, rows) = terminal::size()?;
+        let (cols, rows) = terminal::size()?;
         // let number_of_lines = state.index_of_last_line() + 1;
         let max_rows = rows as usize;
         let text_rows = max_rows.saturating_sub(2);
-        let offset = state.row_offset();
+        let row_offset = state.row_offset();
+        let col_offset = state.col_offset();
+        let width = cols as usize;
 
-        execute!(
-            self.stdout,
-            terminal::Clear(terminal::ClearType::All),
-            cursor::MoveTo(0, 0)
-        )?;
+        queue!(self.stdout, cursor::Hide,)?;
 
         for screen_y in 0..text_rows {
-            let line_index = offset + screen_y;
+            let line_index = row_offset + screen_y;
+
+            queue!(self.stdout, cursor::MoveTo(0, screen_y as u16))?;
+
+            // First, erase everything on this line.
+            queue!(
+                self.stdout,
+                terminal::Clear(terminal::ClearType::CurrentLine)
+            )?;
 
             if line_index <= state.index_of_last_line() {
-                let mut line = state.line_as_string(line_index);
-                if line.ends_with('\n') {
-                    line.pop();
-                }
-                execute!(self.stdout, cursor::MoveTo(0, screen_y as u16), Print(line))?;
+                //let mut line = state.line_as_string(line_index);
+                let visible = state.get_slice(line_index, width);
+
+                queue!(
+                    self.stdout,
+                    Print(visible),
+                    terminal::Clear(terminal::ClearType::UntilNewLine)
+                )?;
             } else {
-                execute!(self.stdout, cursor::MoveTo(0, screen_y as u16), Print("~"))?;
+                queue!(
+                    self.stdout,
+                    Print("~"),
+                    terminal::Clear(terminal::ClearType::UntilNewLine)
+                )?;
             }
         }
 
-        self.update_status_information(state)?;
+        self.queue_status_information(state, cols, rows)?;
 
         // Cursor is in buffer coordinates; convert to screen coordinates using the viewport offset.
         let (cx, cy) = state.cursor_pos();
-        let screen_cy = cy.saturating_sub(offset);
-        execute!(self.stdout, cursor::MoveTo(to_u16(cx), to_u16(screen_cy)))?;
+        let screen_cy = cy.saturating_sub(row_offset);
+        let screen_xy = cx.saturating_sub(col_offset);
+        queue!(
+            self.stdout,
+            cursor::MoveTo(to_u16(screen_xy), to_u16(screen_cy)),
+            cursor::Show
+        )?;
+
+        // single flush
+        self.stdout.flush()?;
 
         Ok(())
     }
