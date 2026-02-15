@@ -3,10 +3,8 @@ use crossterm::{
     event::{Event, KeyCode, read},
     terminal,
 };
-use std::io::{self};
-use std::path::Path;
-
 use emed_core::{EditorCommand, EditorState, InputKey, command_from_key};
+use std::io::{self};
 mod ui;
 use clap::Parser;
 use std::path::PathBuf;
