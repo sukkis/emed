@@ -4,6 +4,7 @@ use crossterm::{
     terminal,
 };
 use std::io::{self};
+use std::path::Path;
 
 use emed_core::{EditorCommand, EditorState, InputKey, command_from_key};
 mod ui;
@@ -17,6 +18,66 @@ const VERSION: &str = "0.0.1";
 struct Args {
     /// File to open
     file: Option<PathBuf>,
+}
+
+/// Handle a keypress while the editor is in prompt mode (e.g. "Save as").
+///
+/// Returns `true` if the prompt is finished (confirmed or cancelled),
+/// so the caller knows to return to normal event routing.
+fn handle_prompt_key(
+    key: InputKey,
+    ui: &mut EditorUi,
+    state: &mut EditorState,
+) -> io::Result<bool> {
+    match key {
+        InputKey::Enter => {
+            // Take the prompt buffer and use it as the filename.
+            if let Some(input) = state.prompt_buffer.take() {
+                let input = input.trim().to_string();
+                if input.is_empty() {
+                    state.help_message = "Save cancelled (empty filename)".to_string();
+                } else {
+                    let path = std::path::Path::new(&input);
+                    match write_to_file(path, state) {
+                        Ok(()) => {
+                            state.filename = input;
+                            state.help_message = "File saved".to_string();
+                        }
+                        Err(e) => {
+                            state.help_message = format!("Save failed: {}", e);
+                        }
+                    }
+                }
+            }
+            ui.draw_screen(state)?;
+            Ok(true)
+        }
+        InputKey::Ctrl('g') => {
+            // Cancel prompt (Emacs-style C-g).
+            state.prompt_buffer = None;
+            state.help_message = "Save cancelled".to_string();
+            ui.draw_screen(state)?;
+            Ok(true)
+        }
+        InputKey::Char(c) => {
+            if let Some(ref mut buf) = state.prompt_buffer {
+                buf.push(c);
+            }
+            ui.draw_screen(state)?;
+            Ok(false)
+        }
+        InputKey::Backspace => {
+            if let Some(ref mut buf) = state.prompt_buffer {
+                buf.pop();
+            }
+            ui.draw_screen(state)?;
+            Ok(false)
+        }
+        _ => {
+            // Ignore other keys while in prompt mode.
+            Ok(false)
+        }
+    }
 }
 
 // Convert crossterm events into a simplified, editor-owned input representation.
@@ -85,6 +146,28 @@ fn apply_command(
 ) -> io::Result<bool> {
     match cmd {
         EditorCommand::Quit => return Ok(true),
+        EditorCommand::SaveFile => {
+            if state.filename != "-" {
+                let path = std::path::Path::new(&state.filename);
+                match write_to_file(path, state) {
+                    Ok(()) => {
+                        state.help_message = "File saved".to_string();
+                    }
+                    Err(e) => {
+                        state.help_message = format!("Save failed: {}", e);
+                    }
+                }
+            } else {
+                // No filename known — enter prompt mode.
+                state.prompt_buffer = Some(String::new());
+            }
+            ui.draw_screen(state)?;
+        }
+        EditorCommand::PromptSaveAs => {
+            // Always enter prompt mode, even if we already have a filename.
+            state.prompt_buffer = Some(String::new());
+            ui.draw_screen(state)?;
+        }
         EditorCommand::MoveLeft => ui.left(state)?,
         EditorCommand::MoveRight => ui.right(state)?,
         EditorCommand::MoveUp => ui.up(state)?,
@@ -108,6 +191,15 @@ fn apply_command(
         EditorCommand::NoOp => {}
     }
     Ok(false)
+}
+
+/// Write the editor buffer to a file.
+///
+/// This is the operation done as a result of "Save" or "Save as".
+/// Caller is responsible for determining the path (from the known filename
+/// or from the "Save as" prompt).
+fn write_to_file(path: &std::path::Path, state: &EditorState) -> io::Result<()> {
+    std::fs::write(path, state.save_to_string())
 }
 
 fn main() -> io::Result<()> {
@@ -151,6 +243,16 @@ fn main() -> io::Result<()> {
     // behavior (keybindings + effects) into small, readable functions.
     loop {
         let event = read()?;
+
+        // If we're in prompt mode, route keypresses to the prompt handler
+        // instead of the normal command pipeline.
+        if state.prompt_buffer.is_some() {
+            if let Some(key) = to_input_key(event) {
+                handle_prompt_key(key, &mut ui, &mut state)?;
+            }
+            continue;
+        }
+
         let cmd = command_from_event(event, &mut saw_ctrl_x);
         let should_quit = apply_command(cmd, &mut ui, &mut state)?;
         if should_quit {

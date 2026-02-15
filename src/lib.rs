@@ -11,6 +11,10 @@ pub struct EditorState {
     pub filename: String,
     pub file_type: FileType,
     pub help_message: String,
+    /// When `Some`, the editor is in prompt mode (e.g. "Save as").
+    /// The `String` accumulates the user's typed input.
+    /// `None` means normal editing mode.
+    pub prompt_buffer: Option<String>,
 }
 
 /// High-level actions the editor understands.
@@ -37,6 +41,8 @@ pub enum EditorCommand {
     InsertNewline,
     DeleteChar,
     Backspace,
+    SaveFile,
+    PromptSaveAs,
     NoOp,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +56,13 @@ pub enum InputKey {
     Up,
     Down,
     Ctrl(char),
+}
+
+// for now we use this for interaction with user about file name to save
+// later this could be used for find
+pub enum EditorMode {
+    Normal,
+    PromptInput,
 }
 
 pub enum FileType {
@@ -95,8 +108,14 @@ impl EditorState {
             screen_size,
             filename: "-".to_string(),
             file_type: FileType::Unknown,
-            help_message: "HELP: C-x C-c OR Ctrl-Q to quit".to_string(),
+            help_message: "HELP: C-x C-s to Save, C-x C-c to Quit".to_string(),
+            prompt_buffer: None,
         }
+    }
+
+    // Saving a file step 1, have it as a string that can be written to a file
+    pub fn save_to_string(&self) -> String {
+        self.text.to_string()
     }
 
     /// Replace the entire buffer with `contents` and update metadata.
@@ -160,6 +179,7 @@ impl EditorState {
                 self.backspace();
                 ApplyResult::Changed
             }
+            EditorCommand::SaveFile | EditorCommand::PromptSaveAs => ApplyResult::NoChange,
 
             EditorCommand::NoOp => ApplyResult::NoChange,
         }
@@ -366,6 +386,7 @@ impl EditorState {
         self.cx = 0;
         self.cy = 0;
         self.row_offset = 0;
+        self.prompt_buffer = None;
         self.ensure_cursor_visible();
     }
 
@@ -396,6 +417,7 @@ pub fn command_from_key(key: InputKey, saw_ctrl_x: &mut bool) -> EditorCommand {
         *saw_ctrl_x = false;
         return match key {
             InputKey::Ctrl('c') => EditorCommand::Quit,
+            InputKey::Ctrl('s') => EditorCommand::SaveFile,
             _ => EditorCommand::NoOp,
         };
     }

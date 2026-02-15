@@ -1,10 +1,13 @@
 # emed
 
-`emed` is a tiny terminal-based editor project I’m building to learn Rust and terminal UI programming (via `crossterm`). It’s a learning playground first, so expect rough edges and frequent changes.
+`emed` is a tiny terminal-based editor project I’m building to learn Rust and terminal UI programming (via `crossterm`). 
+It’s a learning playground first, so expect rough edges and frequent changes.
 
 ## Status
 
-Early prototype / work in progress. Not useful (yet).
+Early prototype / work in progress. 
+
+Basic editing, scrolling, file I/O, and a status bar are functional.
 
 ## Goals
 
@@ -17,12 +20,14 @@ Prerequisites: a recent Rust toolchain.
 
 ## Controls
 
+- Arrow keys — move cursor
 - `Ctrl+q` — quit
 - `Ctrl+x` then `Ctrl+c` — quit (Emacs-style)
+- `Ctrl+x` then `Ctrl+s` — save file (prompts for filename if unknown)
+- `Ctrl+g` — cancel prompt (e.g. "Save as")
+- Typing, Enter, Backspace, Delete — edit text as expected
 
-## Architecture
-
-This project follows a small “model + view + event loop” structure. The goal is to keep the code easy to navigate while still being explicit about terminal details.
+This project follows a small "model + view + event loop" structure. The goal is to keep the code easy to navigate while still being explicit about terminal details.
 
 ### High-level flow (read → translate → apply)
 
@@ -36,46 +41,52 @@ Event (crossterm) → EditorCommand → (EditorState + EditorUi)
 
 Keeping translation separate from execution makes the keybindings easy to change and keeps terminal-specific types from leaking everywhere.
 
+When the editor is in **prompt mode** (e.g. "Save as"), keypresses are routed to a prompt handler instead of the normal command pipeline. The prompt state is tracked via `EditorState.prompt_buffer`.
+
 ### Modules
 
-- `src/main.rs` — event loop, keybindings, command dispatch
-- `src/lib.rs` — editor state (text buffer + cursor), editing operations
-- `src/ui.rs` — terminal rendering and cursor movement (view)
+- `src/main.rs` — event loop, keybindings, command dispatch, file I/O, prompt handling
+- `src/lib.rs` — editor state (text buffer + cursor), editing operations, file type detection
+- `src/ui.rs` — terminal rendering, status bar, and cursor movement (view)
 
 ### Core types (structs/enums)
 
-- `EditorState` — owns the text buffer (currently a `ropey::Rope`) plus the cursor position (`cx`, `cy`)
+- `EditorState` — owns the text buffer (`ropey::Rope`), cursor position, scroll offset, filename, file type, and prompt state
 - `EditorUi` — owns `stdout` and renders an `EditorState` to the terminal
-- `EditorCommand` — a small “vocabulary” of editor actions (move, insert, quit, etc.)
+- `EditorCommand` — a small "vocabulary" of editor actions (move, insert, save, quit, etc.)
+- `InputKey` — a simplified, backend-agnostic representation of a keypress
+- `EditorMode` — tracks whether the editor is in normal editing or prompt input mode
 
 ### Input / event matching
 
-Key presses are translated from `crossterm::Event` into `EditorCommand`. This is also where multi-key “chords” live.
+Key presses are translated from `crossterm::Event` into `EditorCommand`. This is also where multi-key "chords" live.
 
-Example: Emacs-style quitting uses a prefix key:
+The `Ctrl+X` prefix arms a flag (`saw_ctrl_x`); the next keypress is interpreted in that context:
 
-- press `Ctrl+X` to *arm* a prefix
-- the next keypress is interpreted in that context:
-    - `Ctrl+C` becomes `EditorCommand::Quit`
-    - anything else cancels the prefix
-
-This is tracked via a tiny state flag (`saw_ctrl_x`) that persists across events.
+- `Ctrl+C` → `Quit`
+- `Ctrl+S` → `SaveFile`
+- anything else → cancels the prefix
 
 ### Rendering model
 
-Rendering is currently “full screen redraw”:
+Rendering is currently "full screen redraw":
 
 - `EditorUi::draw_screen()` clears the screen and draws the visible buffer.
 - Empty rows are filled with `~` (Vim-style) to make it obvious where the file content ends.
-- After drawing, the terminal cursor is moved to match `EditorState`’s cursor position.
+- The bottom two rows are reserved: a reverse-video **status bar** (file type, line/char counts) and a **help/message line** (keybinding hints, "File saved", or the "Save as" prompt).
+- After drawing, the terminal cursor is moved to match `EditorState`'s cursor position.
+
+### Scrolling
+
+The editor supports vertical scrolling. `EditorState` tracks `row_offset` (the first buffer line visible at the top of the screen). When the cursor moves off-screen, `ensure_cursor_visible()` adjusts the offset so the viewport follows.
 
 ### Future work (short)
 
-- Text editing: backspace/delete, newline handling, tabs
-- Scrolling / viewport (so cursor can move beyond the visible screen)
-- Status line / message area
-- File I/O (open/save) and a proper startup file argument
-- More keybindings and tests for input translation
+- Tabs / indentation
+- Search / find
+- Syntax highlighting
+- "Dirty" flag / unsaved-changes warning on quit
+
 
 ## License
 

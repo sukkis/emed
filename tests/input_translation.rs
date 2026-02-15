@@ -47,3 +47,33 @@ fn ctrl_c_alone_does_not_quit() {
     let cmd = command_from_key(InputKey::Ctrl('c'), &mut saw_ctrl_x);
     assert_eq!(cmd, EditorCommand::NoOp);
 }
+
+#[test]
+fn ctrl_x_then_ctrl_s_saves_file() {
+    let mut saw_ctrl_x = false;
+
+    let cmd1 = command_from_key(InputKey::Ctrl('x'), &mut saw_ctrl_x);
+    assert_eq!(cmd1, EditorCommand::NoOp);
+    assert!(saw_ctrl_x);
+
+    let cmd2 = command_from_key(InputKey::Ctrl('s'), &mut saw_ctrl_x);
+    assert_eq!(cmd2, EditorCommand::SaveFile);
+    assert!(!saw_ctrl_x);
+}
+
+#[test]
+fn ctrl_x_then_ctrl_s_does_not_interfere_with_subsequent_ctrl_x_ctrl_c() {
+    let mut saw_ctrl_x = false;
+
+    // First: C-x C-s → SaveFile
+    let _ = command_from_key(InputKey::Ctrl('x'), &mut saw_ctrl_x);
+    let cmd = command_from_key(InputKey::Ctrl('s'), &mut saw_ctrl_x);
+    assert_eq!(cmd, EditorCommand::SaveFile);
+    assert!(!saw_ctrl_x);
+
+    // Then: C-x C-c should still work → Quit
+    let _ = command_from_key(InputKey::Ctrl('x'), &mut saw_ctrl_x);
+    let cmd = command_from_key(InputKey::Ctrl('c'), &mut saw_ctrl_x);
+    assert_eq!(cmd, EditorCommand::Quit);
+    assert!(!saw_ctrl_x);
+}

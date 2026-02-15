@@ -91,6 +91,14 @@ impl EditorUi {
             state.char_count()
         );
 
+        // When in prompt mode, show the prompt on the help line;
+        // otherwise show the normal help message.
+        let help_line = if let Some(ref input) = state.prompt_buffer {
+            format!("Save as: {}", input)
+        } else {
+            state.help_message.clone()
+        };
+
         execute!(
             self.stdout,
             cursor::MoveTo(0, status_y),
@@ -101,7 +109,7 @@ impl EditorUi {
             SetAttribute(Attribute::Reset),
             cursor::MoveTo(0, help_y),
             terminal::Clear(terminal::ClearType::CurrentLine),
-            Print(fit_to_width(&state.help_message, cols as usize)),
+            Print(fit_to_width(&help_line, cols as usize)),
         )?;
 
         // Re-assert base theme so the rest of the editor stays "pink on black".
