@@ -39,6 +39,7 @@ fn handle_prompt_key(
                     match write_to_file(path, state) {
                         Ok(()) => {
                             state.filename = input;
+                            state.clear_dirty();
                             state.help_message = "File saved".to_string();
                         }
                         Err(e) => {
@@ -150,6 +151,7 @@ fn apply_command(
                 match write_to_file(path, state) {
                     Ok(()) => {
                         state.help_message = "File saved".to_string();
+                        state.clear_dirty();
                     }
                     Err(e) => {
                         state.help_message = format!("Save failed: {}", e);

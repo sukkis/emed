@@ -72,13 +72,22 @@ impl EditorUi {
         let help_y = rows - 1;
 
         let filetype_str = state.file_type.as_str();
+        let cx = state.cursor_pos().0;
+        let cy = state.cursor_pos().1;
 
-        let status_message = format!(
+        // formulate status message from blocks (left, right)
+        let mut left_part = format!(
             "{}: {} lines, {} chars",
             filetype_str,
             state.index_of_last_line() + 1,
             state.char_count()
         );
+        if state.is_dirty() {
+            left_part.push_str(" (modified) ");
+        }
+
+        let right_part = format!("(col: {}, row: {})", cx, cy);
+        let status_message = format!("{}    {}", left_part, right_part);
 
         // When in prompt mode, show the prompt on the help line;
         // otherwise show the normal help message.
@@ -224,7 +233,7 @@ fn to_u16(n: usize) -> u16 {
     u16::try_from(n).unwrap_or(u16::MAX)
 }
 
-fn fit_to_width(s: &str, width: usize) -> String {
+pub fn fit_to_width(s: &str, width: usize) -> String {
     let mut out: String = s.chars().take(width).collect();
     let len = out.chars().count();
     if len < width {

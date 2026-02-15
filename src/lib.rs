@@ -16,6 +16,7 @@ pub struct EditorState {
     /// The `String` accumulates the user's typed input.
     /// `None` means normal editing mode.
     pub prompt_buffer: Option<String>,
+    pub dirty: bool,
 }
 
 /// High-level actions the editor understands.
@@ -112,7 +113,21 @@ impl EditorState {
             file_type: FileType::Unknown,
             help_message: "HELP: C-x C-s to Save, C-x C-c to Quit".to_string(),
             prompt_buffer: None,
+            dirty: false,
         }
+    }
+
+    // buffer changes or not? if edited, "dirty"
+    fn set_dirty(&mut self) {
+        self.dirty = true;
+    }
+
+    pub fn clear_dirty(&mut self) {
+        self.dirty = false;
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
     }
 
     /// Return the fragment of `line_index` that fits into a window of
@@ -165,6 +180,7 @@ impl EditorState {
         self.cy = 0;
         self.row_offset = 0;
         self.ensure_cursor_visible();
+        self.clear_dirty();
     }
 
     /// Apply an `EditorCommand` to `EditorState` (no UI, no IO).
@@ -281,6 +297,8 @@ impl EditorState {
         self.cx += 1;
 
         self.ensure_cursor_visible();
+
+        self.set_dirty();
     }
 
     /// Deletes the character *at* the cursor position (not before it).
@@ -308,7 +326,9 @@ impl EditorState {
         }
 
         self.text.remove(index..index + 1);
-        // self.ensure_cursor_visible();  // later when we have scrolling...
+        self.ensure_cursor_visible();
+
+        self.set_dirty();
     }
 
     /// Backspace behavior:
@@ -325,7 +345,7 @@ impl EditorState {
             self.delete_char(); // deletes the '\n' at end of previous line => merges lines
         }
 
-        // self.ensure_cursor_visible(); // later, with scrolling
+        self.ensure_cursor_visible();
     }
 
     pub fn insert_newline(&mut self) {
@@ -336,6 +356,7 @@ impl EditorState {
         self.cx = 0;
 
         self.ensure_cursor_visible();
+        self.set_dirty();
     }
 
     pub fn set_screen_size(&mut self, screen_size: ScreenSize) {
