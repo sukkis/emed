@@ -86,6 +86,10 @@ impl EditorUi {
             left_part.push_str(" (modified) ");
         }
 
+        if state.quit_count > 0 {
+            left_part.push_str(&format!(" ({} more quit(s) to discard)", state.quit_count));
+        }
+
         let right_part = format!("(col: {}, row: {})", cx, cy);
         let status_message = format!("{}    {}", left_part, right_part);
 

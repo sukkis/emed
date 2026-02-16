@@ -3,7 +3,10 @@ use crossterm::{
     event::{Event, KeyCode, read},
     terminal,
 };
-use emed_core::{EditorCommand, EditorState, InputKey, command_from_key};
+use emed_core::{
+    DEFAULT_HELP_MESSAGE, EditorCommand, EditorState, InputKey, QUIT_CONFIRM_COUNT,
+    command_from_key,
+};
 use std::io::{self};
 mod ui;
 use clap::Parser;
@@ -144,7 +147,32 @@ fn apply_command(
     state: &mut EditorState,
 ) -> io::Result<bool> {
     match cmd {
-        EditorCommand::Quit => return Ok(true),
+        EditorCommand::Quit => {
+            if state.is_dirty() {
+                state.quit_count += 1;
+                if state.quit_count >= QUIT_CONFIRM_COUNT {
+                    return Ok(true); // actually quit
+                }
+                let remaining = QUIT_CONFIRM_COUNT - state.quit_count;
+                state.help_message = format!(
+                    "WARNING: Unsaved changes! Quit {} more time(s), or C-x C-s to save.",
+                    remaining
+                );
+                ui.draw_screen(state)?;
+                return Ok(false);
+            }
+            return Ok(true);
+        }
+        // Any non-Quit command resets the quit counter.
+        _ => {
+            if state.quit_count > 0 {
+                state.reset_quit_count();
+                state.help_message = DEFAULT_HELP_MESSAGE.to_string();
+            }
+        }
+    }
+    match cmd {
+        EditorCommand::Quit => unreachable!(), // handled separately above
         EditorCommand::SaveFile => {
             if state.filename != "-" {
                 let path = std::path::Path::new(&state.filename);

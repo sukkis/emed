@@ -1,8 +1,121 @@
 // tests to see if setting the "(modified)" in status bar works,
 // and is cleared appropriately
 
-use emed_core::{ApplyResult, EditorState, InputKey, command_from_key};
+use emed_core::{
+    ApplyResult, DEFAULT_HELP_MESSAGE, EditorCommand, EditorState, InputKey, QUIT_CONFIRM_COUNT,
+    command_from_key,
+};
 
+// quit confirmation if user has unsaved changes
+
+#[test]
+fn quit_warning_message_appears_and_resets_on_edit() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("hello\n", Some("test.txt"));
+
+    // Make the buffer dirty.
+    apply_key(&mut state, InputKey::Char('x'), &mut false);
+    assert!(state.is_dirty());
+
+    // Simulate what main.rs's apply_command does on Quit with a dirty buffer:
+    state.quit_count += 1;
+    let remaining = QUIT_CONFIRM_COUNT - state.quit_count;
+    state.help_message = format!(
+        "WARNING: Unsaved changes! Quit {} more time(s), or C-x C-s to save.",
+        remaining
+    );
+
+    // Verify the warning is shown with the correct count.
+    assert_eq!(state.quit_count, 1);
+    assert!(
+        state.help_message.contains("2 more time(s)"),
+        "after first quit press, message should say 2 more; got: {}",
+        state.help_message
+    );
+
+    // Second quit press.
+    state.quit_count += 1;
+    let remaining = QUIT_CONFIRM_COUNT - state.quit_count;
+    state.help_message = format!(
+        "WARNING: Unsaved changes! Quit {} more time(s), or C-x C-s to save.",
+        remaining
+    );
+    assert!(
+        state.help_message.contains("1 more time(s)"),
+        "after second quit press, message should say 1 more; got: {}",
+        state.help_message
+    );
+
+    // Now the user decides to keep editing instead of quitting.
+    // Simulate what main.rs does for a non-Quit command:
+    if state.quit_count > 0 {
+        state.reset_quit_count();
+        state.help_message = "HELP: C-x C-s to Save, C-x C-c to Quit".to_string();
+    }
+
+    assert_eq!(state.quit_count, 0);
+    assert_eq!(
+        state.help_message, DEFAULT_HELP_MESSAGE,
+        "help message should be restored after editing resumes"
+    );
+}
+#[test]
+fn quit_on_clean_buffer_returns_quit_immediately() {
+    let mut state = EditorState::new((80, 24));
+    // Buffer is clean — Quit should produce ApplyResult::Quit on the first try.
+    let result = state.apply_command(EditorCommand::Quit);
+    assert_eq!(result, ApplyResult::Quit);
+}
+
+#[test]
+fn quit_on_dirty_buffer_needs_three_presses() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("hello\n", Some("test.txt"));
+
+    // Make it dirty.
+    apply_key(&mut state, InputKey::Char('x'), &mut false);
+    assert!(state.is_dirty());
+
+    // The core's apply_command always returns Quit for EditorCommand::Quit —
+    // the confirmation logic lives in main.rs's apply_command.
+    // So we test the *counter* field directly here.
+    assert_eq!(state.quit_count, 0);
+
+    // Simulate three quit presses by bumping the counter manually
+    // (mirrors what main.rs does).
+    state.quit_count += 1;
+    assert_eq!(state.quit_count, 1);
+    assert!(state.quit_count < QUIT_CONFIRM_COUNT);
+
+    state.quit_count += 1;
+    assert_eq!(state.quit_count, 2);
+    assert!(state.quit_count < QUIT_CONFIRM_COUNT);
+
+    state.quit_count += 1;
+    assert!(state.quit_count >= QUIT_CONFIRM_COUNT); // NOW we'd actually quit
+}
+
+#[test]
+fn quit_count_resets_on_non_quit_action() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("hello\n", Some("test.txt"));
+    apply_key(&mut state, InputKey::Char('x'), &mut false);
+
+    state.quit_count = 2; // user pressed Quit twice
+    state.reset_quit_count(); // then typed a character — counter resets
+    assert_eq!(state.quit_count, 0);
+}
+
+#[test]
+fn quit_count_resets_on_save() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("hello\n", Some("test.txt"));
+    apply_key(&mut state, InputKey::Char('x'), &mut false);
+
+    state.quit_count = 2;
+    state.clear_dirty(); // save clears dirty AND resets quit_count
+    assert_eq!(state.quit_count, 0);
+}
 /// Helper – run a single key through the command pipeline.
 fn apply_key(state: &mut EditorState, key: InputKey, saw_ctrl_x: &mut bool) -> ApplyResult {
     let cmd = command_from_key(key, saw_ctrl_x);

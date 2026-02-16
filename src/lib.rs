@@ -2,6 +2,13 @@ use ropey::{Rope, RopeSlice};
 use std::path::Path;
 
 pub type ScreenSize = (u16, u16);
+
+/// Number of consecutive Quit presses required to discard unsaved changes.
+pub const QUIT_CONFIRM_COUNT: u8 = 3;
+
+/// Default help message shown in the bottom line of the editor.
+pub const DEFAULT_HELP_MESSAGE: &str = "HELP: C-x C-s to Save, C-x C-c to Quit";
+
 pub struct EditorState {
     text: Rope,        // contains all text from all the rows
     cx: usize,         // cursor column in characters (within the line)
@@ -17,6 +24,9 @@ pub struct EditorState {
     /// `None` means normal editing mode.
     pub prompt_buffer: Option<String>,
     pub dirty: bool,
+    /// How many times the user has pressed Quit while the buffer is dirty.
+    /// When this reaches QUIT_CONFIRM_COUNT the editor actually exits.
+    pub quit_count: u8,
 }
 
 /// High-level actions the editor understands.
@@ -111,9 +121,10 @@ impl EditorState {
             screen_size,
             filename: "-".to_string(),
             file_type: FileType::Unknown,
-            help_message: "HELP: C-x C-s to Save, C-x C-c to Quit".to_string(),
+            help_message: DEFAULT_HELP_MESSAGE.to_string(),
             prompt_buffer: None,
             dirty: false,
+            quit_count: 0,
         }
     }
 
@@ -124,10 +135,15 @@ impl EditorState {
 
     pub fn clear_dirty(&mut self) {
         self.dirty = false;
+        self.quit_count = 0;
     }
 
     pub fn is_dirty(&self) -> bool {
         self.dirty
+    }
+
+    pub fn reset_quit_count(&mut self) {
+        self.quit_count = 0;
     }
 
     /// Return the fragment of `line_index` that fits into a window of
