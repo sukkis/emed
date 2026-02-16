@@ -6,6 +6,7 @@ use crossterm::style::Color;
 /// Named colours used in theme definitions.
 /// Keeps theme descriptions human-readable instead of raw crossterm values.
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub enum ThemeColor {
     Black,
     White,
@@ -33,6 +34,7 @@ impl ThemeColor {
     }
 }
 
+#[allow(dead_code)]
 pub struct Theme {
     name: String,
     pub fg: ThemeColor,

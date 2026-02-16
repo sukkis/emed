@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4.5.58", features = ["derive"] }
+config = "0.15.19"
 crossterm = "0.29.0"
 ropey = "1.6.1"
 unicode-width = "0.2.2"
@@ -16,3 +17,6 @@ path = "src/main.rs"
 [lib]
 name = "emed_core"
 path = "src/lib.rs"
+
+[dev-dependencies]
+tempfile = "3.25.0"

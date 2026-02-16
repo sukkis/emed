@@ -8,6 +8,7 @@ use emed_core::{
     command_from_key,
 };
 use std::io::{self};
+mod settings;
 mod theme;
 mod ui;
 use crate::theme::Theme;
@@ -236,7 +237,13 @@ fn write_to_file(path: &std::path::Path, state: &EditorState) -> io::Result<()> 
 fn main() -> io::Result<()> {
     let args = Args::parse();
     let stdout = io::stdout();
-    let mut ui = EditorUi::new(stdout, Theme::from_name("pink"));
+
+    // get user configuration from ./settings.toml, if it exists
+    let toml_content = std::fs::read_to_string("settings.toml").unwrap_or_default();
+    let settings = settings::load_settings(&toml_content);
+    let user_defined_theme = settings.get("theme").unwrap();
+    let user_defined_tab_width = settings.get("tab_width").unwrap();
+    let mut ui = EditorUi::new(stdout, Theme::from_name(user_defined_theme));
 
     terminal::enable_raw_mode()?;
 
@@ -246,6 +253,7 @@ fn main() -> io::Result<()> {
     ui.initialise_editing()?;
 
     let mut state = EditorState::new(screen_size);
+    state.tab_width = user_defined_tab_width.parse::<usize>().unwrap();
 
     // If we have an argument, load the file.
     if let Some(path) = args.file.as_deref() {

@@ -7,7 +7,7 @@
 //!       should be displayed for a given screen width.
 //!   - `cx_to_screen_col` maps char indices to screen columns correctly.
 
-use emed_core::{EditorState, InputKey, TAB_WIDTH, command_from_key};
+use emed_core::{EditorState, InputKey, command_from_key};
 
 /// Helper that feeds a single key into the core and returns the resulting
 /// `ApplyResult`.  Mirrors the `run_key` helper used in `mini_session.rs`.
@@ -203,24 +203,24 @@ fn cx_to_screen_col_accounts_for_tabs() {
 
     // cx=0 → before the tab → screen col 0
     assert_eq!(state.cx_to_screen_col(0, 0), 0);
-    // cx=1 → after the tab → screen col TAB_WIDTH (4)
-    assert_eq!(state.cx_to_screen_col(0, 1), TAB_WIDTH);
-    // cx=2 → after 'a' → TAB_WIDTH + 1
-    assert_eq!(state.cx_to_screen_col(0, 2), TAB_WIDTH + 1);
-    // cx=3 → after 'b' → TAB_WIDTH + 2
-    assert_eq!(state.cx_to_screen_col(0, 3), TAB_WIDTH + 2);
+    // cx=1 → after the tab → screen col state.tab_width (4)
+    assert_eq!(state.cx_to_screen_col(0, 1), state.tab_width);
+    // cx=2 → after 'a' → state.tab_width + 1
+    assert_eq!(state.cx_to_screen_col(0, 2), state.tab_width + 1);
+    // cx=3 → after 'b' → state.tab_width + 2
+    assert_eq!(state.cx_to_screen_col(0, 3), state.tab_width + 2);
 }
 
 /// ---------------------------------------------------------------------------
-/// display_width_of_line counts tabs as TAB_WIDTH columns
+/// display_width_of_line counts tabs as state.tab_width columns
 /// ---------------------------------------------------------------------------
 #[test]
 fn display_width_of_line_with_tabs() {
     let mut state = EditorState::new((80, 24));
-    // Two tabs + "hi" + newline → 2*TAB_WIDTH + 2 visible columns
+    // Two tabs + "hi" + newline → 2*state.tab_width + 2 visible columns
     state.load_document("\t\thi\n", Some("tab.txt"));
 
-    assert_eq!(state.display_width_of_line(0), 2 * TAB_WIDTH + 2);
+    assert_eq!(state.display_width_of_line(0), 2 * state.tab_width + 2);
 }
 
 /// ---------------------------------------------------------------------------
@@ -232,8 +232,8 @@ fn get_slice_expands_tabs_to_spaces() {
     state.load_document("\tab\n", Some("tab.txt"));
 
     let slice = state.get_slice(0, 80);
-    // Tab should be expanded to TAB_WIDTH spaces, followed by "ab"
-    let expected = format!("{}ab", " ".repeat(TAB_WIDTH));
+    // Tab should be expanded to state.tab_width spaces, followed by "ab"
+    let expected = format!("{}ab", " ".repeat(state.tab_width));
     assert_eq!(slice, expected);
 }
 
@@ -252,31 +252,31 @@ fn horizontal_scroll_with_tabs() {
         apply_key(&mut state, InputKey::Right, &mut false);
     }
 
-    // cx=6, screen_col = TAB_WIDTH + 5 = 9, fits in 10-col screen → no scroll
+    // cx=6, screen_col = state.tab_width + 5 = 9, fits in 10-col screen → no scroll
     assert_eq!(state.cursor_pos().0, 6);
-    assert_eq!(state.cx_to_screen_col(0, 6), TAB_WIDTH + 5);
+    assert_eq!(state.cx_to_screen_col(0, 6), state.tab_width + 5);
     assert_eq!(state.col_offset(), 0);
 
     // With no scroll, get_slice should show the full rendered line.
     let slice = state.get_slice(0, 10);
-    assert_eq!(slice, format!("{}Hello", " ".repeat(TAB_WIDTH)));
+    assert_eq!(slice, format!("{}Hello", " ".repeat(state.tab_width)));
 
     // Now use a narrower screen where the tab fits but scrolling is needed.
     // Screen width 6, line: "\tab\n" → [4 spaces]ab = 6 cols exactly.
     let mut state2 = EditorState::new((6, 24));
     state2.load_document("\tab\n", Some("tab2.txt"));
 
-    // Move right twice: past tab and 'a' → cx=2, screen_col = TAB_WIDTH + 1 = 5
+    // Move right twice: past tab and 'a' → cx=2, screen_col = state.tab_width + 1 = 5
     apply_key(&mut state2, InputKey::Right, &mut false);
     apply_key(&mut state2, InputKey::Right, &mut false);
     assert_eq!(state2.cursor_pos().0, 2);
-    assert_eq!(state2.cx_to_screen_col(0, 2), TAB_WIDTH + 1);
+    assert_eq!(state2.cx_to_screen_col(0, 2), state.tab_width + 1);
     // 5 < 6, so no scroll yet
     assert_eq!(state2.col_offset(), 0);
 
     // Full line fits exactly in 6 columns.
     let slice2 = state2.get_slice(0, 6);
-    assert_eq!(slice2, format!("{}ab", " ".repeat(TAB_WIDTH)));
+    assert_eq!(slice2, format!("{}ab", " ".repeat(state.tab_width)));
 
     // Now: screen width 6, line "\t\tab\n" → 4+4+1+1 = 10 screen cols.
     // Move past both tabs → cx=2, screen_col=8, col_offset = 8+1-6 = 3.
@@ -294,5 +294,20 @@ fn horizontal_scroll_with_tabs() {
     //     \t → 4+4=8 > 6 → doesn't fit, stop.
     //   Result: 4 spaces only. The second tab truncates the visible line.
     let slice3 = state3.get_slice(0, 6);
-    assert_eq!(slice3, " ".repeat(TAB_WIDTH));
+    assert_eq!(slice3, " ".repeat(state.tab_width));
+}
+
+/// Changing tab_width is respected by display width calculations
+#[test]
+fn custom_tab_width_is_respected() {
+    let mut state = EditorState::new((80, 24));
+    state.tab_width = 8;
+    state.load_document("\thi\n", Some("tab.txt"));
+
+    // One tab at width 8 + "hi" (2 chars) = 10 columns
+    assert_eq!(state.display_width_of_line(0), 10);
+
+    // And with a narrow tab
+    state.tab_width = 2;
+    assert_eq!(state.display_width_of_line(0), 4);
 }

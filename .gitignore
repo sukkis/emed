@@ -4,3 +4,5 @@
 # JetBrains IDEs
 .idea/
 *.iml
+# user settings
+settings.toml

@@ -10,9 +10,6 @@ pub const QUIT_CONFIRM_COUNT: u8 = 3;
 /// Default help message shown in the bottom line of the editor.
 pub const DEFAULT_HELP_MESSAGE: &str = "HELP: C-x C-s to Save, C-x C-c to Quit";
 
-// We go with tab width of 4 for now. This could be configurable later.
-pub const TAB_WIDTH: usize = 4;
-
 pub struct EditorState {
     text: Rope,        // contains all text from all the rows
     cx: usize,         // cursor column in characters (within the line)
@@ -31,6 +28,7 @@ pub struct EditorState {
     /// How many times the user has pressed Quit while the buffer is dirty.
     /// When this reaches QUIT_CONFIRM_COUNT the editor actually exits.
     pub quit_count: u8,
+    pub tab_width: usize,
 }
 
 /// High-level actions the editor understands.
@@ -129,6 +127,7 @@ impl EditorState {
             prompt_buffer: None,
             dirty: false,
             quit_count: 0,
+            tab_width: 4,
         }
     }
 
@@ -138,7 +137,7 @@ impl EditorState {
             .line(line_index)
             .chars()
             .take(cx)
-            .map(Self::display_width)
+            .map(|c| self.display_width(c))
             .sum()
     }
 
@@ -161,9 +160,9 @@ impl EditorState {
     }
 
     /// calculate screen width for a single character, using unicode-width
-    pub fn display_width(c: char) -> usize {
+    pub fn display_width(&self, c: char) -> usize {
         match c {
-            '\t' => TAB_WIDTH,
+            '\t' => self.tab_width,
             '\n' => 0,
             '\r' => 0,
             _ => c.width().unwrap_or(0),
@@ -175,18 +174,18 @@ impl EditorState {
         self.text
             .line(line_index)
             .chars()
-            .map(Self::display_width)
+            .map(|c| self.display_width(c))
             .sum()
     }
 
     /// Collect characters from `chars` that fit within `max_cols` screen columns.
     /// Tabs are expanded to spaces. Returns the rendered string.
-    fn render_to_width(chars: impl Iterator<Item = char>, max_cols: usize) -> String {
+    fn render_to_width(&self, chars: impl Iterator<Item = char>, max_cols: usize) -> String {
         let mut out = String::new();
         let mut cols_used = 0;
 
         for c in chars {
-            let w = Self::display_width(c);
+            let w = self.display_width(c);
             if cols_used + w > max_cols {
                 break;
             }
@@ -209,7 +208,7 @@ impl EditorState {
         // Skip characters until we've passed col_offset screen columns.
         let mut skip_cols = 0;
         let visible_chars = line.chars().filter(|&c| c != '\n').skip_while(|&c| {
-            let w = Self::display_width(c);
+            let w = self.display_width(c);
             if skip_cols + w <= self.col_offset {
                 skip_cols += w;
                 true
@@ -218,7 +217,7 @@ impl EditorState {
             }
         });
 
-        Self::render_to_width(visible_chars, screen_width)
+        self.render_to_width(visible_chars, screen_width)
     }
 
     // Saving a file step 1, have it as a string that can be written to a file

@@ -1,8 +1,6 @@
 use crate::VERSION;
 use crate::theme::Theme;
-use crossterm::style::{
-    Attribute, Color, Print, SetAttribute, SetBackgroundColor, SetForegroundColor,
-};
+use crossterm::style::{Attribute, Print, SetAttribute, SetBackgroundColor, SetForegroundColor};
 use crossterm::{cursor, queue, style::ResetColor, terminal};
 use emed_core::EditorState;
 use std::io;

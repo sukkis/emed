@@ -19,20 +19,24 @@ handler instead of the normal command pipeline. The prompt state is tracked via
 
 ## Modules
 
-| File          | Responsibility                                                               |
-|---------------|------------------------------------------------------------------------------|
-| `src/main.rs` | Event loop, keybindings, command dispatch, file I/O, prompt handling         |
-| `src/lib.rs`  | Editor state (text buffer + cursor), editing operations, file type detection |
-| `src/ui.rs`   | Terminal rendering, status bar, cursor movement (view)                       |
+| File              | Responsibility                                                               |
+|-------------------|------------------------------------------------------------------------------|
+| `src/main.rs`     | Event loop, keybindings, command dispatch, file I/O, prompt handling         |
+| `src/lib.rs`      | Editor state (text buffer + cursor), editing operations, file type detection |
+| `src/ui.rs`       | Terminal rendering, status bar, cursor movement (view)                       |
+| `src/settings.rs` | Configuration loading from TOML with fallback defaults                       |
+| `src/theme.rs`    | Color theme definitions and named color abstraction                          |
 
 ## Core types
 
 - **`EditorState`** — owns the text buffer (`ropey::Rope`), cursor position, scroll offsets, filename, file type, and
   prompt state
-- **`EditorUi`** — owns `stdout` and renders an `EditorState` to the terminal
+- **`EditorUi`** — owns `stdout` and a `Theme`; renders an `EditorState` to the terminal
 - **`EditorCommand`** — a small vocabulary of editor actions (move, insert, save, quit, …)
 - **`InputKey`** — a simplified, backend-agnostic representation of a keypress
 - **`ApplyResult`** — return value from applying a command (`NoChange`, `Changed`, `Quit`)
+- **`Theme`** — a set of named colours for foreground, background, status bar, and tilde lines
+- **`ThemeColor`** — human-readable colour names that map to `crossterm::style::Color`
 
 ## Input / event matching
 
@@ -65,7 +69,25 @@ viewport follows.
 
 ### Tab handling
 
-Tab characters are expanded to spaces for rendering (fixed at 4 columns, defined by `TAB_WIDTH`).
-Display-width calculations use `unicode-width` for regular characters and the fixed tab width
-for `\t`. When a tab is too wide to fit the remaining visible columns, the line is truncated
-at that point.
+Tab characters are expanded to spaces for rendering. The tab width defaults to 4 columns
+and is configurable via `tab_width` in `settings.toml`. The value is stored in
+`EditorState.tab_width` and used by `display_width()` for all width calculations.
+Display-width calculations use `unicode-width` for regular characters. When a tab is too
+wide to fit the remaining visible columns, the line is truncated at that point.
+
+## Configuration & theming
+
+Settings are loaded at startup from `settings.toml` in the working directory (if present).
+The `config` crate handles parsing and merging with built-in defaults, so missing keys are
+always safe.
+
+Currently supported settings:
+
+- **`theme`** — selects a built-in colour theme (`"pink"` or `"ocean"`). Unknown names
+  fall back to `"pink"`.
+- **`tab_width`** — tab display width in columns (default: 4).
+
+Themes are defined in `src/theme.rs`. Each theme specifies foreground, background, status-bar,
+and tilde-line colours using `ThemeColor`, which wraps `crossterm::style::Color` behind
+readable names. Adding a new theme means adding a constructor to `Theme` and a match arm in
+`Theme::from_name()`.
