@@ -193,10 +193,13 @@ impl EditorUi {
         // Cursor is in buffer coordinates; convert to screen coordinates using the viewport offset.
         let (cx, cy) = state.cursor_pos();
         let screen_cy = cy.saturating_sub(row_offset);
-        let screen_xy = cx.saturating_sub(col_offset);
+
+        // get screen x position of cursor using unicode-width in background
+        let screen_col = state.cx_to_screen_col(cy, cx);
+        let screen_cx = screen_col.saturating_sub(col_offset);
         queue!(
             self.stdout,
-            cursor::MoveTo(to_u16(screen_xy), to_u16(screen_cy)),
+            cursor::MoveTo(to_u16(screen_cx), to_u16(screen_cy)),
             cursor::Show
         )?;
 

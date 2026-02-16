@@ -1,12 +1,13 @@
 //! Horizontal‑scrolling tests for the EMED core.
 //!
-//! These focus on two things:
+//! These focus on:
 //!   - `EditorState::ensure_cursor_visible` updates `col_offset` correctly
 //!       when the cursor moves past the right edge of the visible window.
 //!   - `EditorState::get_slice` returns exactly the characters that
 //!       should be displayed for a given screen width.
+//!   - `cx_to_screen_col` maps char indices to screen columns correctly.
 
-use emed_core::{EditorState, InputKey, command_from_key};
+use emed_core::{EditorState, InputKey, TAB_WIDTH, command_from_key};
 
 /// Helper that feeds a single key into the core and returns the resulting
 /// `ApplyResult`.  Mirrors the `run_key` helper used in `mini_session.rs`.
@@ -20,7 +21,7 @@ fn apply_key(
 }
 
 /// ---------------------------------------------------------------------------
-/// 1️⃣  Horizontal offset updates when the cursor moves right
+/// Horizontal offset updates when the cursor moves right
 /// ---------------------------------------------------------------------------
 #[test]
 fn col_offset_advances_when_cursor_exceeds_screen_width() {
@@ -50,7 +51,7 @@ fn col_offset_advances_when_cursor_exceeds_screen_width() {
 }
 
 /// ---------------------------------------------------------------------------
-/// 2️⃣  `get_slice` returns the correct fragment for a given width
+/// `get_slice` returns the correct fragment for a given width
 /// ---------------------------------------------------------------------------
 #[test]
 fn get_slice_respects_col_offset_and_width() {
@@ -77,7 +78,7 @@ fn get_slice_respects_col_offset_and_width() {
 }
 
 /// ---------------------------------------------------------------------------
-/// 3️⃣  `get_slice` returns the whole line when the line is shorter than the screen
+/// `get_slice` returns the whole line when the line is shorter than the screen
 /// ---------------------------------------------------------------------------
 #[test]
 fn get_slice_returns_full_line_when_line_shorter_than_screen() {
@@ -93,7 +94,7 @@ fn get_slice_returns_full_line_when_line_shorter_than_screen() {
 }
 
 /// ---------------------------------------------------------------------------
-/// 4️⃣  Horizontal scrolling works together with vertical scrolling
+/// Horizontal scrolling works together with vertical scrolling
 /// ---------------------------------------------------------------------------
 #[test]
 fn horizontal_and_vertical_scrolling_combined() {
@@ -126,4 +127,172 @@ fn horizontal_and_vertical_scrolling_combined() {
     // The second line is all 'b's, so we expect "bbbb".
     let slice = state.get_slice(1, 5);
     assert_eq!(slice, "bbbb");
+}
+
+/// ---------------------------------------------------------------------------
+/// cx_to_screen_col matches char index for pure ASCII
+/// ---------------------------------------------------------------------------
+#[test]
+fn cx_to_screen_col_matches_char_index_for_ascii() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("hello world\n", Some("test.txt"));
+
+    // For pure ASCII, screen col == char index
+    assert_eq!(state.cx_to_screen_col(0, 0), 0);
+    assert_eq!(state.cx_to_screen_col(0, 5), 5);
+    assert_eq!(state.cx_to_screen_col(0, 11), 11);
+}
+
+/// ---------------------------------------------------------------------------
+/// Typing past screen width scrolls the viewport
+/// ---------------------------------------------------------------------------
+#[test]
+fn typing_past_screen_width_scrolls_viewport() {
+    let mut state = EditorState::new((10, 24));
+
+    // Type 12 characters on a 10-column screen
+    for c in "abcdefghijkl".chars() {
+        state.insert_char(c);
+    }
+
+    // cx = 12, screen_col = 12
+    assert_eq!(state.cursor_pos().0, 12);
+    assert_eq!(state.cx_to_screen_col(0, 12), 12);
+
+    // col_offset should have advanced: 12 + 1 - 10 = 3
+    assert_eq!(state.col_offset(), 3);
+
+    // Visible slice should show characters from offset 3, width 10
+    let slice = state.get_slice(0, 10);
+    assert_eq!(slice, "defghijkl");
+}
+
+/// ---------------------------------------------------------------------------
+/// col_offset snaps back to 0 when cursor moves left
+/// ---------------------------------------------------------------------------
+#[test]
+fn col_offset_snaps_back_when_cursor_moves_left() {
+    let mut state = EditorState::new((5, 24));
+    state.load_document("abcdefghijklmnopqrstuvwxyz\n", Some("test.txt"));
+
+    // Move right to trigger scroll
+    for _ in 0..10 {
+        apply_key(&mut state, InputKey::Right, &mut false);
+    }
+    assert!(state.col_offset() > 0);
+
+    // Move all the way back left
+    for _ in 0..10 {
+        apply_key(&mut state, InputKey::Left, &mut false);
+    }
+
+    assert_eq!(state.cursor_pos(), (0, 0));
+    assert_eq!(state.col_offset(), 0);
+}
+
+// make sure tab calculations work
+
+/// ---------------------------------------------------------------------------
+/// cx_to_screen_col accounts for tab width
+/// ---------------------------------------------------------------------------
+#[test]
+fn cx_to_screen_col_accounts_for_tabs() {
+    let mut state = EditorState::new((80, 24));
+    // Line: \t a b \n  →  chars: ['\t', 'a', 'b', '\n']
+    state.load_document("\tab\n", Some("tab.txt"));
+
+    // cx=0 → before the tab → screen col 0
+    assert_eq!(state.cx_to_screen_col(0, 0), 0);
+    // cx=1 → after the tab → screen col TAB_WIDTH (4)
+    assert_eq!(state.cx_to_screen_col(0, 1), TAB_WIDTH);
+    // cx=2 → after 'a' → TAB_WIDTH + 1
+    assert_eq!(state.cx_to_screen_col(0, 2), TAB_WIDTH + 1);
+    // cx=3 → after 'b' → TAB_WIDTH + 2
+    assert_eq!(state.cx_to_screen_col(0, 3), TAB_WIDTH + 2);
+}
+
+/// ---------------------------------------------------------------------------
+/// display_width_of_line counts tabs as TAB_WIDTH columns
+/// ---------------------------------------------------------------------------
+#[test]
+fn display_width_of_line_with_tabs() {
+    let mut state = EditorState::new((80, 24));
+    // Two tabs + "hi" + newline → 2*TAB_WIDTH + 2 visible columns
+    state.load_document("\t\thi\n", Some("tab.txt"));
+
+    assert_eq!(state.display_width_of_line(0), 2 * TAB_WIDTH + 2);
+}
+
+/// ---------------------------------------------------------------------------
+/// get_slice expands tabs to spaces
+/// ---------------------------------------------------------------------------
+#[test]
+fn get_slice_expands_tabs_to_spaces() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("\tab\n", Some("tab.txt"));
+
+    let slice = state.get_slice(0, 80);
+    // Tab should be expanded to TAB_WIDTH spaces, followed by "ab"
+    let expected = format!("{}ab", " ".repeat(TAB_WIDTH));
+    assert_eq!(slice, expected);
+}
+
+/// ---------------------------------------------------------------------------
+/// Horizontal scrolling with tabs: a tab that doesn't fit truncates the line
+/// ---------------------------------------------------------------------------
+#[test]
+fn horizontal_scroll_with_tabs() {
+    // Screen width of 10 columns.
+    // Line: "\tHello\n" → screen: [4 spaces]Hello = 9 cols
+    let mut state = EditorState::new((10, 24));
+    state.load_document("\tHello\n", Some("tab.txt"));
+
+    // Move right past the tab and all of "Hello" (5 chars) → cx=6
+    for _ in 0..6 {
+        apply_key(&mut state, InputKey::Right, &mut false);
+    }
+
+    // cx=6, screen_col = TAB_WIDTH + 5 = 9, fits in 10-col screen → no scroll
+    assert_eq!(state.cursor_pos().0, 6);
+    assert_eq!(state.cx_to_screen_col(0, 6), TAB_WIDTH + 5);
+    assert_eq!(state.col_offset(), 0);
+
+    // With no scroll, get_slice should show the full rendered line.
+    let slice = state.get_slice(0, 10);
+    assert_eq!(slice, format!("{}Hello", " ".repeat(TAB_WIDTH)));
+
+    // Now use a narrower screen where the tab fits but scrolling is needed.
+    // Screen width 6, line: "\tab\n" → [4 spaces]ab = 6 cols exactly.
+    let mut state2 = EditorState::new((6, 24));
+    state2.load_document("\tab\n", Some("tab2.txt"));
+
+    // Move right twice: past tab and 'a' → cx=2, screen_col = TAB_WIDTH + 1 = 5
+    apply_key(&mut state2, InputKey::Right, &mut false);
+    apply_key(&mut state2, InputKey::Right, &mut false);
+    assert_eq!(state2.cursor_pos().0, 2);
+    assert_eq!(state2.cx_to_screen_col(0, 2), TAB_WIDTH + 1);
+    // 5 < 6, so no scroll yet
+    assert_eq!(state2.col_offset(), 0);
+
+    // Full line fits exactly in 6 columns.
+    let slice2 = state2.get_slice(0, 6);
+    assert_eq!(slice2, format!("{}ab", " ".repeat(TAB_WIDTH)));
+
+    // Now: screen width 6, line "\t\tab\n" → 4+4+1+1 = 10 screen cols.
+    // Move past both tabs → cx=2, screen_col=8, col_offset = 8+1-6 = 3.
+    let mut state3 = EditorState::new((6, 24));
+    state3.load_document("\t\tab\n", Some("tab3.txt"));
+
+    apply_key(&mut state3, InputKey::Right, &mut false);
+    apply_key(&mut state3, InputKey::Right, &mut false);
+    assert_eq!(state3.col_offset(), 3);
+
+    // get_slice with col_offset=3, width=6:
+    //   skip_while: first \t has w=4, skip_cols(0)+4 <= 3? No → stop.
+    //   render_to_width sees: \t(4), \t(4), 'a', 'b'
+    //     \t → 4 cols used, fits in 6 → "    "
+    //     \t → 4+4=8 > 6 → doesn't fit, stop.
+    //   Result: 4 spaces only. The second tab truncates the visible line.
+    let slice3 = state3.get_slice(0, 6);
+    assert_eq!(slice3, " ".repeat(TAB_WIDTH));
 }

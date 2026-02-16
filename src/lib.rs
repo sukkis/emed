@@ -1,5 +1,6 @@
 use ropey::{Rope, RopeSlice};
 use std::path::Path;
+use unicode_width::UnicodeWidthChar;
 
 pub type ScreenSize = (u16, u16);
 
@@ -8,6 +9,9 @@ pub const QUIT_CONFIRM_COUNT: u8 = 3;
 
 /// Default help message shown in the bottom line of the editor.
 pub const DEFAULT_HELP_MESSAGE: &str = "HELP: C-x C-s to Save, C-x C-c to Quit";
+
+// We go with tab width of 4 for now. This could be configurable later.
+pub const TAB_WIDTH: usize = 4;
 
 pub struct EditorState {
     text: Rope,        // contains all text from all the rows
@@ -128,6 +132,16 @@ impl EditorState {
         }
     }
 
+    /// Convert a char-index on a given line to its screen column.
+    pub fn cx_to_screen_col(&self, line_index: usize, cx: usize) -> usize {
+        self.text
+            .line(line_index)
+            .chars()
+            .take(cx)
+            .map(Self::display_width)
+            .sum()
+    }
+
     // buffer changes or not? if edited, "dirty"
     fn set_dirty(&mut self) {
         self.dirty = true;
@@ -146,31 +160,65 @@ impl EditorState {
         self.quit_count = 0;
     }
 
-    /// Return the fragment of `line_index` that fits into a window of
-    /// `screen_width` columns, starting at the current horizontal offset.
-    ///
-    /// The returned `String` may be shorter than `screen_width`; the UI
-    /// clears the remainder of the line with `Clear(UntilNewLine)`.
-    pub fn get_slice(&self, line_index: usize, screen_width: usize) -> String {
-        // get rope indexes
-        let line_start = self.text.line_to_char(line_index);
-        let line_end = self.text.line_to_char(line_index + 1);
-
-        // rope index with offset
-        let win_start = line_start + self.col_offset;
-
-        // If the window starts past the line, there is nothing to show.
-        if win_start >= line_end {
-            return String::new(); // UI will just clear the row.
+    /// calculate screen width for a single character, using unicode-width
+    pub fn display_width(c: char) -> usize {
+        match c {
+            '\t' => TAB_WIDTH,
+            '\n' => 0,
+            '\r' => 0,
+            _ => c.width().unwrap_or(0),
         }
-        let win_end = (win_start + screen_width).min(line_end);
+    }
 
-        // slice from start + offset
+    // calculate screen width for whole line
+    pub fn display_width_of_line(&self, line_index: usize) -> usize {
         self.text
-            .slice(win_start..win_end)
-            .to_string()
-            .trim_end_matches('\n')
-            .to_string()
+            .line(line_index)
+            .chars()
+            .map(Self::display_width)
+            .sum()
+    }
+
+    /// Collect characters from `chars` that fit within `max_cols` screen columns.
+    /// Tabs are expanded to spaces. Returns the rendered string.
+    fn render_to_width(chars: impl Iterator<Item = char>, max_cols: usize) -> String {
+        let mut out = String::new();
+        let mut cols_used = 0;
+
+        for c in chars {
+            let w = Self::display_width(c);
+            if cols_used + w > max_cols {
+                break;
+            }
+            if c == '\t' {
+                // Expand tab to spaces
+                out.extend(std::iter::repeat_n(' ', w));
+            } else {
+                out.push(c);
+            }
+            cols_used += w;
+        }
+
+        out
+    }
+
+    /// get characters that fit within `max_cols` screen columns.
+    pub fn get_slice(&self, line_index: usize, screen_width: usize) -> String {
+        let line = self.text.line(line_index);
+
+        // Skip characters until we've passed col_offset screen columns.
+        let mut skip_cols = 0;
+        let visible_chars = line.chars().filter(|&c| c != '\n').skip_while(|&c| {
+            let w = Self::display_width(c);
+            if skip_cols + w <= self.col_offset {
+                skip_cols += w;
+                true
+            } else {
+                false
+            }
+        });
+
+        Self::render_to_width(visible_chars, screen_width)
     }
 
     // Saving a file step 1, have it as a string that can be written to a file
@@ -268,17 +316,18 @@ impl EditorState {
 
         // horizontal scrolling
         let width = self.text_area_width();
+        let screen_col = self.cx_to_screen_col(self.cy, self.cx);
 
         // If the line is shorter than the screen we want to keep col_offset = 0.
         // Otherwise we slide the viewport so that `cx` lands inside `[col_offset, col_offset+width)`.
         if width == 0 {
-            self.col_offset = self.cx;
-        } else if self.cx < self.col_offset {
+            self.col_offset = screen_col;
+        } else if screen_col < self.col_offset {
             // cursor moved left of the visible window
-            self.col_offset = self.cx;
-        } else if self.cx >= self.col_offset + width {
+            self.col_offset = screen_col;
+        } else if screen_col >= self.col_offset + width {
             // cursor moved right past the right edge
-            self.col_offset = self.cx + 1 - width;
+            self.col_offset = screen_col + 1 - width;
         }
     }
 
