@@ -8,10 +8,13 @@ use emed_core::{
     command_from_key,
 };
 use std::io::{self};
+mod theme;
 mod ui;
+use crate::theme::Theme;
 use clap::Parser;
 use std::path::PathBuf;
 use ui::EditorUi;
+
 const VERSION: &str = "0.0.1";
 
 #[derive(Parser, Debug)]
@@ -233,7 +236,7 @@ fn write_to_file(path: &std::path::Path, state: &EditorState) -> io::Result<()> 
 fn main() -> io::Result<()> {
     let args = Args::parse();
     let stdout = io::stdout();
-    let mut ui = EditorUi::new(stdout);
+    let mut ui = EditorUi::new(stdout, Theme::from_name("pink"));
 
     terminal::enable_raw_mode()?;
 

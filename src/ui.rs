@@ -1,4 +1,5 @@
 use crate::VERSION;
+use crate::theme::Theme;
 use crossterm::style::{
     Attribute, Color, Print, SetAttribute, SetBackgroundColor, SetForegroundColor,
 };
@@ -9,10 +10,11 @@ use std::io::{Stdout, Write};
 
 pub struct EditorUi {
     stdout: Stdout,
+    theme: Theme,
 }
 impl EditorUi {
-    pub fn new(stdout: Stdout) -> Self {
-        Self { stdout }
+    pub fn new(stdout: Stdout, theme: Theme) -> Self {
+        Self { stdout, theme }
     }
 
     pub fn clean_up(&mut self) -> io::Result<()> {
@@ -33,8 +35,8 @@ impl EditorUi {
         let chars = title.chars().count();
         let _ = queue!(
             self.stdout,
-            SetBackgroundColor(Color::Black),
-            SetForegroundColor(Color::Magenta),
+            SetBackgroundColor(self.theme.bg.to_crossterm()),
+            SetForegroundColor(self.theme.fg.to_crossterm()),
             SetAttribute(Attribute::Bold),
             cursor::MoveTo((cols / 2) - chars as u16 / 2, rows / 2 - 2),
             Print(&title),
@@ -47,8 +49,8 @@ impl EditorUi {
         queue!(
             self.stdout,
             // black on pink theme
-            SetBackgroundColor(Color::Black),
-            SetForegroundColor(Color::Magenta),
+            SetBackgroundColor(self.theme.bg.to_crossterm()),
+            SetForegroundColor(self.theme.fg.to_crossterm()),
             // clear and move cursor to right place
             cursor::MoveTo(0, 0),
             terminal::Clear(terminal::ClearType::CurrentLine),
@@ -105,20 +107,23 @@ impl EditorUi {
             self.stdout,
             cursor::MoveTo(0, status_y),
             terminal::Clear(terminal::ClearType::CurrentLine),
-            SetAttribute(Attribute::Reverse),
+            SetBackgroundColor(self.theme.status_bg.to_crossterm()),
+            SetForegroundColor(self.theme.status_fg.to_crossterm()),
             SetAttribute(Attribute::Bold),
             Print(fit_to_width(&status_message, cols as usize)),
             SetAttribute(Attribute::Reset),
             cursor::MoveTo(0, help_y),
             terminal::Clear(terminal::ClearType::CurrentLine),
+            SetBackgroundColor(self.theme.bg.to_crossterm()),
+            SetForegroundColor(self.theme.fg.to_crossterm()),
             Print(fit_to_width(&help_line, cols as usize)),
         )?;
 
         // Re-assert base theme so the rest of the editor stays "pink on black".
         queue!(
             self.stdout,
-            SetBackgroundColor(Color::Black),
-            SetForegroundColor(Color::Magenta),
+            SetBackgroundColor(self.theme.bg.to_crossterm()),
+            SetForegroundColor(self.theme.fg.to_crossterm()),
         )?;
 
         Ok(())
@@ -182,7 +187,9 @@ impl EditorUi {
             } else {
                 queue!(
                     self.stdout,
+                    SetForegroundColor(self.theme.tilde_fg.to_crossterm()),
                     Print("~"),
+                    SetForegroundColor(self.theme.fg.to_crossterm()),
                     terminal::Clear(terminal::ClearType::UntilNewLine)
                 )?;
             }
