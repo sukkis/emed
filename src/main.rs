@@ -8,6 +8,7 @@ use emed_core::{
     command_from_key,
 };
 use std::io::{self};
+
 mod settings;
 mod theme;
 mod ui;

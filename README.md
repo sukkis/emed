@@ -54,6 +54,11 @@ See [architecture.md](architecture.md) for design notes, module layout, and inte
 - [ ] Incremental search (find)
 - [ ] Syntax highlighting
 
+Extras
+
+- [x] Colour themes support
+- [x] Configurable tab width
+
 ## License
 
 GNU General Public License v3.0 (GPL-3.0).

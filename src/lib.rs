@@ -1,3 +1,5 @@
+pub mod lexer;
+use lexer::{Lexer, Token, TokenKind, lexer_for_file_type};
 use ropey::{Rope, RopeSlice};
 use std::path::Path;
 use unicode_width::UnicodeWidthChar;
@@ -10,6 +12,14 @@ pub const QUIT_CONFIRM_COUNT: u8 = 3;
 /// Default help message shown in the bottom line of the editor.
 pub const DEFAULT_HELP_MESSAGE: &str = "HELP: C-x C-s to Save, C-x C-c to Quit";
 
+/// The state of the editor has no UI implementation details,
+/// and does not depend on crossterm.
+/// A "rope" (Ropey) is used to store the whole text.
+/// Rendered text is calculated in the UI side using slices from full text.
+/// Cursor position is the character-based position in buffer,
+/// not the visual position seen on the screen.
+/// E.g. If an opened file has a tab character, it is only one character in the buffer,
+/// but visually it is rendered as multiple characters.
 pub struct EditorState {
     text: Rope,        // contains all text from all the rows
     cx: usize,         // cursor column in characters (within the line)
@@ -29,6 +39,12 @@ pub struct EditorState {
     /// When this reaches QUIT_CONFIRM_COUNT the editor actually exits.
     pub quit_count: u8,
     pub tab_width: usize,
+    /// Syntax lexer chosen based on `file_type`.  `None` = no highlighting.
+    lexer: Option<Box<dyn Lexer>>,
+    /// Per-line token cache.  `token_cache[i]` holds the tokens for line `i`.
+    /// Invalidated on any edit (initially just clear the whole vec;
+    /// later we can do smarter incremental invalidation).
+    token_cache: Vec<Vec<Token>>,
 }
 
 /// High-level actions the editor understands.
@@ -128,7 +144,40 @@ impl EditorState {
             dirty: false,
             quit_count: 0,
             tab_width: 4,
+            lexer: None,
+            token_cache: Vec::new(),
         }
+    }
+
+    /// Add tokens of one line to the cache.
+    /// Calling lexer.tokenize_line() does the heavy lifting.
+    pub fn tokens_for_line(&mut self, line_index: usize) -> &[Token] {
+        // only do something if we don't have a cache
+        if self.token_cache[line_index].is_empty() {
+            // do we have a lexer? (might be a plain text file)
+            if let Some(lexer) = &self.lexer {
+                // Step 3: Get the line text from the rope, tokenize it.
+                let line_str = self.text.line(line_index).to_string();
+                let (tokens, _) = lexer.tokenize_line(&line_str, false);
+
+                // Step 4: Store the result so we don't re-tokenize next time.
+                self.token_cache[line_index] = tokens;
+            }
+            // If lexer is None, token_cache stays empty → no highlighting.
+        }
+
+        // return a reference to the cached tokens (possibly empty).
+        &self.token_cache[line_index]
+    }
+
+    /// Any mutation (insert_char, delete_char, backspace, insert_newline)
+    /// clears the cache.
+    pub fn invalidate_syntax_highlighting(&mut self) {
+        self.invalidate_tokens();
+    }
+    fn invalidate_tokens(&mut self) {
+        self.token_cache.clear();
+        self.token_cache.resize(self.text.len_lines(), Vec::new());
     }
 
     /// Convert a char-index on a given line to its screen column.
