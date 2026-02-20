@@ -26,6 +26,7 @@ handler instead of the normal command pipeline. The prompt state is tracked via
 | `src/ui.rs`       | Terminal rendering, status bar, cursor movement (view)                       |
 | `src/settings.rs` | Configuration loading from TOML with fallback defaults                       |
 | `src/theme.rs`    | Color theme definitions and named color abstraction                          |
+| `src/lexer.rs`    | Syntax highlighting: lexer trait, per-language lexers                        |
 
 ## Core types
 
@@ -37,6 +38,9 @@ handler instead of the normal command pipeline. The prompt state is tracked via
 - **`ApplyResult`** — return value from applying a command (`NoChange`, `Changed`, `Quit`)
 - **`Theme`** — a set of named colours for foreground, background, status bar, and tilde lines
 - **`ThemeColor`** — human-readable colour names that map to `crossterm::style::Color`
+- **`Lexer`** (trait) — turns a single line into a sequence of `Token`s; one impl per language
+- **`Token`** — a coloured span within a line: byte offset, length, and `TokenKind`
+- **`TokenKind`** — the category of a token (`Normal`, `Number`, `Comment`, `Operator`, …)
 
 ## Input / event matching
 
@@ -91,3 +95,44 @@ Themes are defined in `src/theme.rs`. Each theme specifies foreground, backgroun
 and tilde-line colours using `ThemeColor`, which wraps `crossterm::style::Color` behind
 readable names. Adding a new theme means adding a constructor to `Theme` and a match arm in
 `Theme::from_name()`.
+
+## Syntax highlighting
+
+Syntax highlighting is implemented as a simple per-line lexer pipeline:
+
+1. **Lexer selection** — when a file is loaded, `load_document()` picks a lexer based on file
+   extension (`RustLexer` for `.rs`, `PlainLexer` for everything else). A fresh buffer with
+   no file also gets a `PlainLexer` so that number literals are highlighted immediately.
+
+2. **Tokenization** — each `Lexer` implements `tokenize_line(line, in_comment) → (Vec<Token>, bool)`.
+   Shared rules (like number-literal detection with word-boundary awareness) live in free
+   functions (`is_number_start`, `tokenize_numbers`) so every language lexer can reuse them.
+
+3. **Caching** — `EditorState` maintains a `token_cache: Vec<Vec<Token>>` with one entry per
+   line. `tokens_for_line(i)` tokenizes on first access and returns the cached result.
+   The entire cache is invalidated on every edit (via `set_dirty() → invalidate_tokens()`).
+
+4. **Rendering** — `draw_screen()` walks each visible character, looks up which token it
+   belongs to, and sets the foreground colour accordingly (e.g. `number_fg` for `Number`
+   tokens). Characters that don't match any token fall back to the theme's default foreground.
+
+### Word-boundary rule
+
+A digit is only classified as a `Number` token if it is **not** preceded by a letter or
+underscore. This prevents the "16" in `u16` or the "32" in `my_var32` from being highlighted
+as numbers — they're part of an identifier. Standalone literals like `42`, `(123)`, and
+`x + 7` are highlighted correctly.
+
+### Adding a new language
+
+1. Create a new struct (e.g. `CLexer`) in `lexer.rs`.
+2. Implement the `Lexer` trait — call `tokenize_numbers()` as a baseline, then refine
+   `Normal` spans into keywords, types, strings, comments, etc.
+3. Add a match arm in `lexer_for_file_type()`.
+4. Add the file extension in `file_type_from_filename()` in `lib.rs`.
+
+## Terminal safety
+
+The main function wraps the editor loop in `std::panic::catch_unwind` so that
+`EditorUi::clean_up()` always runs — even on panics. This restores the terminal from raw
+mode and prevents the user from being stranded in an unusable terminal session.

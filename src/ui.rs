@@ -1,8 +1,9 @@
+use crate::Theme::{self};
 use crate::VERSION;
-use crate::theme::Theme;
 use crossterm::style::{Attribute, Print, SetAttribute, SetBackgroundColor, SetForegroundColor};
 use crossterm::{cursor, queue, style::ResetColor, terminal};
 use emed_core::EditorState;
+use emed_core::lexer::TokenKind;
 use std::io;
 use std::io::{Stdout, Write};
 
@@ -57,8 +58,13 @@ impl EditorUi {
         Ok(())
     }
 
-    // two last rows are for status information and help.
-    // the lowest one is help, status is shown above it
+    /// Queue the status bar and help/message line into the terminal buffer.
+    ///
+    /// Renders two rows at the bottom of the screen:
+    /// - **Status bar** — file type, line/char counts, `(modified)` flag,
+    ///   cursor position. Displayed in reverse-video (status theme colours).
+    /// - **Help line** — either the default keybinding hints, a transient
+    ///   message (e.g. "File saved"), or the prompt input when in prompt mode.
     pub fn queue_status_information(
         &mut self,
         state: &EditorState,
@@ -127,59 +133,83 @@ impl EditorUi {
         Ok(())
     }
 
-    pub fn draw_screen(&mut self, state: &EditorState) -> io::Result<()> {
-        // Draw a complete "frame" of the editor.
-        //
-        // Rendering model:
-        // - Full redraw (simple + robust): we clear and repaint the entire terminal every time.
-        // - The bottom 2 rows are reserved for UI chrome:
-        //     * second-to-last row: status bar (reverse video)
-        //     * last row: help / message line
-        //   Everything above those rows is the text viewport.
-        //
-        // Scrolling model:
-        // - `EditorState` keeps the cursor position in *buffer coordinates* (cx, cy), where `cy`
-        //   is the absolute line index in the rope.
-        // - `EditorState` also stores `row_offset`, which is the buffer line shown at screen row 0.
-        //   When the cursor would move off-screen, the state bumps `row_offset` to keep it visible.
-        // - During drawing we map:
-        //     buffer line index = row_offset + screen_y
-        //   so that the viewport "slides" over the buffer.
-        //
-        // Cursor mapping:
-        // - Terminal cursor uses *screen coordinates* (x, y).
-        // - The buffer cursor uses *buffer coordinates* (cx, cy).
-        // - To place the terminal cursor correctly in the viewport we subtract the scroll offset:
-        //     screen_cy = cy - row_offset
-        //   (using `saturating_sub` to avoid underflow if something goes out of sync).
+    /// Render a complete frame of the editor to the terminal.
+    ///
+    /// Performs a full redraw every time: clears each line and repaints it.
+    /// The screen is divided into three regions:
+    ///
+    /// - **Text area** (top) — visible portion of the buffer, with syntax
+    ///   highlighting applied via the token cache in [`EditorState`]. Lines
+    ///   beyond the end of the buffer show a `~` in the tilde colour.
+    /// - **Status bar** (second-to-last row) — file type, line count, dirty
+    ///   flag, and cursor coordinates.
+    /// - **Help / message line** (last row) — keybinding hints, or the
+    ///   prompt input when in prompt mode.
+    ///
+    /// The viewport scrolls so that the cursor (in buffer coordinates) is
+    /// always visible: `row_offset` / `col_offset` from [`EditorState`]
+    /// control which slice of the buffer is shown.
+    pub fn draw_screen(&mut self, state: &mut EditorState) -> io::Result<()> {
         let (cols, rows) = terminal::size()?;
-        // let number_of_lines = state.index_of_last_line() + 1;
         let max_rows = rows as usize;
         let text_rows = max_rows.saturating_sub(2);
         let row_offset = state.row_offset();
         let col_offset = state.col_offset();
         let width = cols as usize;
 
-        queue!(self.stdout, cursor::Hide,)?;
+        queue!(self.stdout, cursor::Hide)?;
 
         for screen_y in 0..text_rows {
             let line_index = row_offset + screen_y;
 
             queue!(self.stdout, cursor::MoveTo(0, screen_y as u16))?;
 
-            // First, erase everything on this line.
             queue!(
                 self.stdout,
                 terminal::Clear(terminal::ClearType::CurrentLine)
             )?;
 
             if line_index <= state.index_of_last_line() {
-                //let mut line = state.line_as_string(line_index);
                 let visible = state.get_slice(line_index, width);
+
+                let tokens = state.tokens_for_line(line_index).to_vec();
+                if tokens.is_empty() {
+                    queue!(self.stdout, Print(&visible))?;
+                } else {
+                    for (char_idx, ch) in visible.chars().enumerate() {
+                        let buf_col = col_offset + char_idx;
+
+                        let kind = tokens
+                            .iter()
+                            .find(|t| buf_col >= t.start && buf_col < t.start + t.len)
+                            .map(|t| t.kind)
+                            .unwrap_or(TokenKind::Normal);
+
+                        match kind {
+                            TokenKind::Number => {
+                                queue!(
+                                    self.stdout,
+                                    SetForegroundColor(self.theme.number_fg.to_crossterm()),
+                                    Print(ch),
+                                )?;
+                            }
+                            _ => {
+                                queue!(
+                                    self.stdout,
+                                    SetForegroundColor(self.theme.fg.to_crossterm()),
+                                    Print(ch),
+                                )?;
+                            }
+                        }
+                    }
+                    queue!(
+                        self.stdout,
+                        SetForegroundColor(self.theme.fg.to_crossterm()),
+                    )?;
+                }
 
                 queue!(
                     self.stdout,
-                    Print(visible),
                     terminal::Clear(terminal::ClearType::UntilNewLine)
                 )?;
             } else {
@@ -195,11 +225,8 @@ impl EditorUi {
 
         self.queue_status_information(state, cols, rows)?;
 
-        // Cursor is in buffer coordinates; convert to screen coordinates using the viewport offset.
         let (cx, cy) = state.cursor_pos();
         let screen_cy = cy.saturating_sub(row_offset);
-
-        // get screen x position of cursor using unicode-width in background
         let screen_col = state.cx_to_screen_col(cy, cx);
         let screen_cx = screen_col.saturating_sub(col_offset);
         queue!(
@@ -208,12 +235,10 @@ impl EditorUi {
             cursor::Show
         )?;
 
-        // single flush
         self.stdout.flush()?;
 
         Ok(())
     }
-
     //
     // cursor movement functions
     //

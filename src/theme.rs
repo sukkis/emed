@@ -16,6 +16,7 @@ pub enum ThemeColor {
     DarkGrey,
     Grey,
     Cyan,
+    Yellow,
 }
 
 impl ThemeColor {
@@ -30,6 +31,7 @@ impl ThemeColor {
             ThemeColor::DarkGrey => Color::DarkGrey,
             ThemeColor::Grey => Color::Grey,
             ThemeColor::Cyan => Color::Cyan,
+            ThemeColor::Yellow => Color::Yellow,
         }
     }
 }
@@ -42,6 +44,7 @@ pub struct Theme {
     pub status_fg: ThemeColor,
     pub status_bg: ThemeColor,
     pub tilde_fg: ThemeColor,
+    pub number_fg: ThemeColor,
 }
 
 impl Theme {
@@ -62,6 +65,7 @@ impl Theme {
             status_fg: ThemeColor::Black,
             status_bg: ThemeColor::Magenta,
             tilde_fg: ThemeColor::Magenta,
+            number_fg: ThemeColor::Yellow,
         }
     }
 
@@ -74,6 +78,7 @@ impl Theme {
             status_fg: ThemeColor::Black,
             status_bg: ThemeColor::DarkCyan,
             tilde_fg: ThemeColor::DarkGreen,
+            number_fg: ThemeColor::Yellow,
         }
     }
 }

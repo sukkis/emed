@@ -1,5 +1,5 @@
 pub mod lexer;
-use lexer::{Lexer, Token, TokenKind, lexer_for_file_type};
+use lexer::{Lexer, Token, lexer_for_file_type};
 use ropey::{Rope, RopeSlice};
 use std::path::Path;
 use unicode_width::UnicodeWidthChar;
@@ -144,14 +144,20 @@ impl EditorState {
             dirty: false,
             quit_count: 0,
             tab_width: 4,
-            lexer: None,
-            token_cache: Vec::new(),
+            lexer: Some(lexer_for_file_type(&FileType::Unknown)),
+            token_cache: vec![Vec::new(); 1], // Rope::new() has 1 line
         }
     }
 
     /// Add tokens of one line to the cache.
     /// Calling lexer.tokenize_line() does the heavy lifting.
     pub fn tokens_for_line(&mut self, line_index: usize) -> &[Token] {
+        // If the cache hasn't been initialized (no file loaded, or index out of range),
+        // return an empty slice — no highlighting.
+        if line_index >= self.token_cache.len() {
+            return &[];
+        }
+
         // only do something if we don't have a cache
         if self.token_cache[line_index].is_empty() {
             // do we have a lexer? (might be a plain text file)
@@ -193,6 +199,7 @@ impl EditorState {
     // buffer changes or not? if edited, "dirty"
     fn set_dirty(&mut self) {
         self.dirty = true;
+        self.invalidate_tokens();
     }
 
     pub fn clear_dirty(&mut self) {
@@ -250,7 +257,11 @@ impl EditorState {
         out
     }
 
-    /// get characters that fit within `max_cols` screen columns.
+    /// Return the visible portion of a buffer line as a rendered string.
+    ///
+    /// Applies horizontal scrolling (`col_offset`) and truncates to
+    /// `screen_width` columns. Tabs are expanded to spaces; trailing
+    /// newlines are stripped. The result is ready to print to the terminal.
     pub fn get_slice(&self, line_index: usize, screen_width: usize) -> String {
         let line = self.text.line(line_index);
 
@@ -276,7 +287,10 @@ impl EditorState {
 
     /// Replace the entire buffer with `contents` and update metadata.
     ///
-    /// Pure operation: no file system access; caller provides the contents.
+    /// This is a pure operation — no file-system access; the caller provides
+    /// the file contents. Sets the filename, detects the [`FileType`] from
+    /// the extension, initializes the syntax [`Lexer`] and token cache,
+    /// and resets the cursor and scroll position.
     pub fn load_document(&mut self, contents: &str, filename: Option<&str>) {
         self.text = Rope::from_str(contents);
 
@@ -287,6 +301,12 @@ impl EditorState {
             self.filename = "-".to_string();
             self.file_type = FileType::Unknown;
         }
+
+        // Initialize the lexer based on the detected file type.
+        self.lexer = Some(lexer_for_file_type(&self.file_type));
+
+        // Initialize the token cache with one empty vec per line.
+        self.token_cache = vec![Vec::new(); self.text.len_lines()];
 
         self.cx = 0;
         self.cy = 0;
@@ -342,12 +362,11 @@ impl EditorState {
         }
     }
 
-    // scrolling
-
-    /// Adjust `row_offset` so that the cursor line (`cy`) is visible.
+    /// Adjust `row_offset` and `col_offset` so the cursor is visible.
     ///
-    /// This is what makes "press Enter on the last visible row" scroll the view:
-    /// after `cy` changes, we shift the viewport until `cy` fits in the text area.
+    /// Called after every cursor movement or buffer mutation. Shifts the
+    /// viewport vertically and horizontally so that the cursor line and
+    /// column fall within the on-screen text area.
     pub fn ensure_cursor_visible(&mut self) {
         // vertical scrolling
         let height = self.text_area_height();

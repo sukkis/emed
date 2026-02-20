@@ -248,6 +248,25 @@ fn main() -> io::Result<()> {
 
     terminal::enable_raw_mode()?;
 
+    // Run the editor in a closure so we can always clean up,
+    // even if something panics or returns an error.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run_editor(&args, &mut ui, user_defined_tab_width)
+    }));
+
+    // Always clean up the terminal, no matter what happened.
+    let _ = ui.clean_up();
+
+    match result {
+        Ok(inner) => inner,
+        Err(panic_payload) => {
+            // Re-print the panic message now that the terminal is restored.
+            std::panic::resume_unwind(panic_payload);
+        }
+    }
+}
+
+fn run_editor(args: &Args, ui: &mut EditorUi, user_defined_tab_width: &str) -> io::Result<()> {
     let screen_size = terminal::size()?;
 
     ui.print_editor_version(screen_size.0, screen_size.1)?;
@@ -262,44 +281,26 @@ fn main() -> io::Result<()> {
         state.load_document(&contents, path.to_str());
     }
 
-    ui.draw_screen(&state)?;
+    ui.draw_screen(&mut state)?;
 
     let mut saw_ctrl_x = false;
 
-    // Main event loop architecture ("read → translate → apply").
-    //
-    // We keep the interactive part of the editor deliberately split into three steps:
-    //
-    // 1) Read: `crossterm::event::read()` blocks until the terminal produces an `Event`.
-    // 2) Translate: `command_from_event(event, &mut saw_ctrl_x)` turns that low-level event into an
-    //    `EditorCommand` (our small, editor-centric vocabulary). This is also where multi-key
-    //    chords live: `saw_ctrl_x` remembers whether the previous keypress was `Ctrl+X`, so the
-    //    next key can complete `Ctrl+X` then `Ctrl+C` to quit.
-    // 3) Apply: `apply_command(cmd, &mut ui, &mut state)` performs the command by mutating the
-    //    `EditorState` and redrawing via `EditorUi` when needed. It returns `true` when we should
-    //    exit the loop.
-    //
-    // This structure keeps terminal-specific details at the edges, and concentrates editor
-    // behavior (keybindings + effects) into small, readable functions.
     loop {
         let event = read()?;
 
-        // If we're in prompt mode, route keypresses to the prompt handler
-        // instead of the normal command pipeline.
         if state.prompt_buffer.is_some() {
             if let Some(key) = to_input_key(event) {
-                handle_prompt_key(key, &mut ui, &mut state)?;
+                handle_prompt_key(key, ui, &mut state)?;
             }
             continue;
         }
 
         let cmd = command_from_event(event, &mut saw_ctrl_x);
-        let should_quit = apply_command(cmd, &mut ui, &mut state)?;
+        let should_quit = apply_command(cmd, ui, &mut state)?;
         if should_quit {
             break;
         }
     }
 
-    ui.clean_up()?;
     Ok(())
 }

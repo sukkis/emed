@@ -52,12 +52,13 @@ See [architecture.md](architecture.md) for design notes, module layout, and inte
 - [x] Tab rendering (configurable width)
 - [x] Unicode display-width support
 - [ ] Incremental search (find)
-- [ ] Syntax highlighting
+- [x] Syntax highlighting (number literals; word-boundary aware)
 
 Extras
 
 - [x] Colour themes support
 - [x] Configurable tab width
+- [x] Panic-safe terminal cleanup
 
 ## License
 
