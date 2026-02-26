@@ -59,8 +59,6 @@ pub struct PlainLexer;
 
 // ── Shared highlighting primitives ──────────────────────────────────
 
-/// Is `chars[i]` the start of a standalone number literal?
-///
 /// A digit counts as a number only if it's NOT preceded by a letter or underscore.
 /// This prevents highlighting the "16" in "u16" or "32" in "my_var32".
 fn is_number_start(chars: &[char], i: usize) -> bool {
