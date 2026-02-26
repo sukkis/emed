@@ -1,81 +1,64 @@
 # emed
 
-`emed` is a tiny terminal-based editor project I’m building to learn Rust and terminal UI programming (via `crossterm`). It’s a learning playground first, so expect rough edges and frequent changes.
+A tiny terminal-based text editor, built to learn Rust and terminal UI programming.
 
-## Status
-
-Early prototype / work in progress. Not useful (yet).
-
-## Goals
-
-- Learn Rust by building something interactive
-- Keep the codebase small and understandable
-
-## Build & run
-
-Prerequisites: a recent Rust toolchain.
+Early prototype — expect rough edges and frequent changes.
 
 ## Controls
 
-- `q` — quit
+- Arrow keys — move cursor
+- `Ctrl+q` — quit
 - `Ctrl+x` then `Ctrl+c` — quit (Emacs-style)
+- `Ctrl+x` then `Ctrl+s` — save file (prompts for filename if unknown)
+- `Ctrl+g` — cancel prompt
+- Typing, Enter, Backspace, Delete — edit text as expected
+
+## Dependencies
+
+| Crate                                                   | Purpose                                                           |
+|---------------------------------------------------------|-------------------------------------------------------------------|
+| [crossterm](https://crates.io/crates/crossterm)         | Terminal I/O: raw mode, key events, cursor control, styled output |
+| [ropey](https://crates.io/crates/ropey)                 | Rope data structure for the text buffer                           |
+| [clap](https://crates.io/crates/clap)                   | Command-line argument parsing                                     |
+| [config](https://crates.io/crates/config)               | Configuration file loading with defaults                          |
+| [unicode-width](https://crates.io/crates/unicode-width) | Display-width calculation for Unicode characters and tabs         |
+
+## Configuration
+
+Copy the example config and edit to taste:
+
+`cp settings.toml.example settings.toml`
+
+Available settings:
+
+| Key         | Default  | Description                         |
+|-------------|----------|-------------------------------------|
+| `theme`     | `"pink"` | Color theme — `"pink"` or `"ocean"` |
+| `tab_width` | `"4"`    | Tab display width in columns        |
 
 ## Architecture
 
-This project follows a small “model + view + event loop” structure. The goal is to keep the code easy to navigate while still being explicit about terminal details.
+See [architecture.md](architecture.md) for design notes, module layout, and internal details.
 
-### High-level flow (read → translate → apply)
+## Roadmap (kilo feature parity)
 
-The main loop is intentionally split into three steps:
+- [x] Basic editing (insert, delete, backspace, newline)
+- [x] Cursor movement (arrow keys)
+- [x] Vertical scrolling
+- [x] Horizontal scrolling
+- [x] Status bar (filename, line count, cursor position, dirty flag)
+- [x] File I/O (open, save, "Save as" prompt)
+- [x] Quit confirmation for unsaved changes
+- [x] Tab rendering (configurable width)
+- [x] Unicode display-width support
+- [ ] Incremental search (find)
+- [x] Syntax highlighting (number literals; word-boundary aware)
 
-Event (crossterm) → EditorCommand → (EditorState + EditorUi)
+Extras
 
-1) **Read**: block for terminal input via `crossterm::event::read()`.
-2) **Translate**: convert the raw `crossterm::Event` into an `EditorCommand`.
-3) **Apply**: execute the `EditorCommand` by mutating `EditorState` and redrawing via `EditorUi`.
-
-Keeping translation separate from execution makes the keybindings easy to change and keeps terminal-specific types from leaking everywhere.
-
-### Modules
-
-- `src/main.rs` — event loop, keybindings, command dispatch
-- `src/lib.rs` — editor state (text buffer + cursor), editing operations
-- `src/ui.rs` — terminal rendering and cursor movement (view)
-
-### Core types (structs/enums)
-
-- `EditorState` — owns the text buffer (currently a `ropey::Rope`) plus the cursor position (`cx`, `cy`)
-- `EditorUi` — owns `stdout` and renders an `EditorState` to the terminal
-- `EditorCommand` — a small “vocabulary” of editor actions (move, insert, quit, etc.)
-
-### Input / event matching
-
-Key presses are translated from `crossterm::Event` into `EditorCommand`. This is also where multi-key “chords” live.
-
-Example: Emacs-style quitting uses a prefix key:
-
-- press `Ctrl+X` to *arm* a prefix
-- the next keypress is interpreted in that context:
-    - `Ctrl+C` becomes `EditorCommand::Quit`
-    - anything else cancels the prefix
-
-This is tracked via a tiny state flag (`saw_ctrl_x`) that persists across events.
-
-### Rendering model
-
-Rendering is currently “full screen redraw”:
-
-- `EditorUi::draw_screen()` clears the screen and draws the visible buffer.
-- Empty rows are filled with `~` (Vim-style) to make it obvious where the file content ends.
-- After drawing, the terminal cursor is moved to match `EditorState`’s cursor position.
-
-### Future work (short)
-
-- Text editing: backspace/delete, newline handling, tabs
-- Scrolling / viewport (so cursor can move beyond the visible screen)
-- Status line / message area
-- File I/O (open/save) and a proper startup file argument
-- More keybindings and tests for input translation
+- [x] Colour themes support
+- [x] Configurable tab width
+- [x] Panic-safe terminal cleanup
 
 ## License
 
