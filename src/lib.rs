@@ -1,4 +1,5 @@
 pub mod lexer;
+pub mod search;
 use lexer::{Lexer, Token, lexer_for_file_type};
 use ropey::{Rope, RopeSlice};
 use std::path::Path;
