@@ -507,6 +507,17 @@ impl EditorState {
     pub fn cursor_pos(&self) -> (usize, usize) {
         (self.cx, self.cy)
     }
+
+    /// Convert a char index into the buffer into a `(cx, cy)` cursor
+    /// position. An index at or past the end of the buffer clamps to
+    /// `len_chars()`, which lands on the trailing empty line ropey adds
+    /// after a final `\n`.
+    pub fn char_index_to_cursor(&self, idx: usize) -> (usize, usize) {
+        let idx = idx.min(self.text.len_chars());
+        let cy = self.text.char_to_line(idx);
+        let cx = idx - self.text.line_to_char(cy);
+        (cx, cy)
+    }
     pub fn cursor_left(&mut self) {
         if self.cx > 0 {
             self.cx -= 1;
