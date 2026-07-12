@@ -66,6 +66,46 @@ fn byte_to_char_index(s: &str, byte_idx: usize) -> usize {
     s[..byte_idx].chars().count()
 }
 
+/// Bookkeeping for an in-progress incremental search: the query typed so far,
+/// and the char index the cursor was at when the search started.
+///
+/// This struct knows nothing about `EditorState` — it only tracks its own
+/// fields and can compute where the current query matches in a haystack
+/// that's handed to it. Nothing here moves a cursor.
+pub struct SearchSession {
+    /// What the user has typed so far.
+    pub query: String,
+    /// Char index the cursor was at when the search started. Every match is
+    /// searched for starting here — Emacs semantics, so the match "grows"
+    /// from the origin as the query grows, rather than drifting forward from
+    /// wherever the previous (shorter) query happened to match.
+    origin: usize,
+}
+
+impl SearchSession {
+    pub fn new(origin: usize) -> Self {
+        SearchSession {
+            query: String::new(),
+            origin,
+        }
+    }
+
+    pub fn push_char(&mut self, c: char) {
+        self.query.push(c);
+    }
+
+    pub fn backspace(&mut self) {
+        self.query.pop();
+    }
+
+    /// Where the current query matches in `haystack`, searching forward from
+    /// `origin` only — no wraparound. Wrapping is reserved for the explicit
+    /// "search again" action (Commit 4's `search_repeat`), not for typing.
+    pub fn current_match(&self, haystack: &str) -> Option<usize> {
+        find_from(haystack, &self.query, self.origin, false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,5 +145,51 @@ mod tests {
         // "áé" is 2 chars but 4 bytes. 'x' is char index 2 (byte index 4).
         // This guards the one subtle part of the implementation.
         assert_eq!(find_from("áéx", "x", 0, false), Some(2));
+    }
+
+    // --- SearchSession: query bookkeeping, no EditorState involved ---
+
+    #[test]
+    fn push_char_accumulates_query() {
+        let mut session = SearchSession::new(0);
+        session.push_char('c');
+        session.push_char('a');
+        session.push_char('t');
+        assert_eq!(session.query, "cat");
+    }
+
+    #[test]
+    fn backspace_shrinks_query() {
+        let mut session = SearchSession::new(0);
+        session.push_char('c');
+        session.push_char('a');
+        session.push_char('t');
+        session.backspace();
+        assert_eq!(session.query, "ca");
+    }
+
+    #[test]
+    fn empty_query_has_no_match() {
+        // Mirrors find_from's own rule: an empty needle never matches.
+        let session = SearchSession::new(0);
+        assert_eq!(session.current_match("hello world"), None);
+    }
+
+    #[test]
+    fn growing_query_refinds_from_origin_not_zero() {
+        // "cat cat": origin sits right at the second "cat" (index 4), so a
+        // correct implementation must search from `origin`, not from 0 —
+        // otherwise every match below would be Some(0) instead of Some(4).
+        let haystack = "cat cat";
+        let mut session = SearchSession::new(4);
+
+        session.push_char('c');
+        assert_eq!(session.current_match(haystack), Some(4));
+
+        session.push_char('a');
+        assert_eq!(session.current_match(haystack), Some(4));
+
+        session.push_char('t');
+        assert_eq!(session.current_match(haystack), Some(4));
     }
 }
