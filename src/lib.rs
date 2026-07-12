@@ -2,6 +2,7 @@ pub mod lexer;
 pub mod search;
 use lexer::{Lexer, Token, lexer_for_file_type};
 use ropey::{Rope, RopeSlice};
+use search::SearchSession;
 use std::path::Path;
 use unicode_width::UnicodeWidthChar;
 
@@ -46,6 +47,8 @@ pub struct EditorState {
     /// Invalidated on any edit (initially just clear the whole vec;
     /// later we can do smarter incremental invalidation).
     token_cache: Vec<Vec<Token>>,
+    /// When `Some`, an incremental search is in progress.
+    search: Option<SearchSession>,
 }
 
 /// High-level actions the editor understands.
@@ -147,6 +150,7 @@ impl EditorState {
             tab_width: 4,
             lexer: Some(lexer_for_file_type(&FileType::Unknown)),
             token_cache: vec![Vec::new(); 1], // Rope::new() has 1 line
+            search: None,
         }
     }
 
@@ -314,6 +318,7 @@ impl EditorState {
         self.row_offset = 0;
         self.ensure_cursor_visible();
         self.clear_dirty();
+        self.search = None;
     }
 
     /// Apply an `EditorCommand` to `EditorState` (no UI, no IO).
@@ -517,6 +522,55 @@ impl EditorState {
         let cy = self.text.char_to_line(idx);
         let cx = idx - self.text.line_to_char(cy);
         (cx, cy)
+    }
+
+    /// Begin an incremental search, anchored at the current cursor position.
+    pub fn search_start(&mut self) {
+        let origin = self.text.line_to_char(self.cy) + self.cx;
+        self.search = Some(SearchSession::new(origin));
+    }
+
+    /// Re-run the active session's match against the whole buffer and, if it
+    /// found something, move the cursor there. No match leaves the cursor
+    /// exactly where it was.
+    fn refresh_search_match(&mut self) {
+        let query_match = match self.search.as_ref() {
+            Some(session) => session.current_match(&self.save_to_string()),
+            None => return,
+        };
+
+        if let Some(idx) = query_match {
+            let (cx, cy) = self.char_index_to_cursor(idx);
+            self.set_cursor(cx, cy);
+            self.ensure_cursor_visible();
+        }
+    }
+
+    /// Append a character to the active search query and jump to the match,
+    /// if any. Does nothing if no search is in progress.
+    pub fn search_push_char(&mut self, c: char) {
+        if let Some(session) = self.search.as_mut() {
+            session.push_char(c);
+        }
+        self.refresh_search_match();
+    }
+
+    /// Remove the last character from the active search query and re-match.
+    /// Does nothing if no search is in progress.
+    pub fn search_backspace(&mut self) {
+        if let Some(session) = self.search.as_mut() {
+            session.backspace();
+        }
+        self.refresh_search_match();
+    }
+
+    pub fn is_searching(&self) -> bool {
+        self.search.is_some()
+    }
+
+    /// The query typed so far, or `None` if no search is in progress.
+    pub fn search_query(&self) -> Option<&str> {
+        self.search.as_ref().map(|session| session.query.as_str())
     }
     pub fn cursor_left(&mut self) {
         if self.cx > 0 {
