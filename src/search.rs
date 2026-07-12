@@ -104,6 +104,16 @@ impl SearchSession {
     pub fn current_match(&self, haystack: &str) -> Option<usize> {
         find_from(haystack, &self.query, self.origin, false)
     }
+
+    /// Where the *next* occurrence of the query is, for the explicit
+    /// "search again" action. `after` is the position the cursor is
+    /// already at (the match `current_match` previously found) — the
+    /// search starts at `after + 1`, not `after`, so this never
+    /// re-reports the match already sitting under the cursor. Wraps
+    /// around the buffer if nothing is found before the end.
+    pub fn repeat_match(&self, haystack: &str, after: usize) -> Option<usize> {
+        find_from(haystack, &self.query, after + 1, true)
+    }
 }
 
 #[cfg(test)]
@@ -191,5 +201,32 @@ mod tests {
 
         session.push_char('t');
         assert_eq!(session.current_match(haystack), Some(4));
+    }
+
+    // --- SearchSession: repeat_match, for the explicit "search again" action ---
+    //
+    // `after` is where the cursor already is (the match `current_match`
+    // already found and jumped to). `repeat_match` finds the *next* one
+    // past that — never `after` itself — which is why the first case below
+    // is asked to move from 0 to 4, not confirm 0 again.
+
+    #[test]
+    fn repeat_match_finds_next_occurrence_after_given_position() {
+        let mut session = SearchSession::new(0);
+        for c in "cat".chars() {
+            session.push_char(c);
+        }
+        // "cat cat cat": occurrences at 0, 4, 8. Already at 0, next is 4.
+        assert_eq!(session.repeat_match("cat cat cat", 0), Some(4));
+    }
+
+    #[test]
+    fn repeat_match_wraps_to_first_occurrence_when_none_after_position() {
+        let mut session = SearchSession::new(0);
+        for c in "cat".chars() {
+            session.push_char(c);
+        }
+        // Already at the last occurrence (8); nothing follows, so it wraps.
+        assert_eq!(session.repeat_match("cat cat cat", 8), Some(0));
     }
 }

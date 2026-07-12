@@ -84,6 +84,36 @@ fn is_searching_and_search_query_reflect_state() {
 }
 
 #[test]
+fn search_repeat_advances_through_matches_and_wraps() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("cat cat cat\n", Some("test.txt"));
+
+    state.search_start();
+    state.search_push_char('c');
+    state.search_push_char('a');
+    state.search_push_char('t');
+    assert_eq!(state.cursor_pos(), (0, 0)); // first "cat", found by typing
+
+    state.search_repeat();
+    assert_eq!(state.cursor_pos(), (4, 0)); // second "cat"
+
+    state.search_repeat();
+    assert_eq!(state.cursor_pos(), (8, 0)); // third "cat"
+
+    state.search_repeat();
+    assert_eq!(state.cursor_pos(), (0, 0)); // wraps back to the first
+}
+
+#[test]
+fn search_repeat_does_nothing_without_an_active_search() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("cat cat cat\n", Some("test.txt"));
+
+    state.search_repeat(); // no active session — must not panic or move
+    assert_eq!(state.cursor_pos(), (0, 0));
+}
+
+#[test]
 fn loading_a_new_document_clears_any_active_search() {
     let mut state = EditorState::new((80, 24));
     state.load_document("abc\n", Some("test.txt"));

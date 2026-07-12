@@ -564,6 +564,24 @@ impl EditorState {
         self.refresh_search_match();
     }
 
+    /// Move to the next occurrence of the active query, wrapping around
+    /// the buffer if necessary. Does nothing if no search is in progress.
+    pub fn search_repeat(&mut self) {
+        let next_match = match self.search.as_ref() {
+            Some(session) => {
+                let current = self.text.line_to_char(self.cy) + self.cx;
+                session.repeat_match(&self.save_to_string(), current)
+            }
+            None => return,
+        };
+
+        if let Some(idx) = next_match {
+            let (cx, cy) = self.char_index_to_cursor(idx);
+            self.set_cursor(cx, cy);
+            self.ensure_cursor_visible();
+        }
+    }
+
     pub fn is_searching(&self) -> bool {
         self.search.is_some()
     }
