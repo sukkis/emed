@@ -17,6 +17,12 @@ When the editor is in **prompt mode** (e.g. "Save as"), keypresses are routed to
 handler instead of the normal command pipeline. The prompt state is tracked via
 `EditorState.prompt_buffer`.
 
+The same applies to **search mode**: while `EditorState.is_searching()` is true, keypresses
+are routed to `handle_search_key` instead. One exception: keys that lead toward quitting or
+saving (`Ctrl+Q`, `Ctrl+X`) are checked first via `escapes_search` — if matched, the search is
+cancelled and the key falls through to the normal pipeline instead, so quitting (or saving)
+is never unreachable just because a search happens to be open.
+
 ## Modules
 
 | File              | Responsibility                                                               |
@@ -27,13 +33,14 @@ handler instead of the normal command pipeline. The prompt state is tracked via
 | `src/settings.rs` | Configuration loading from TOML with fallback defaults                       |
 | `src/theme.rs`    | Color theme definitions and named color abstraction                          |
 | `src/lexer.rs`    | Syntax highlighting: lexer trait, per-language lexers                        |
+| `src/search.rs`   | Incremental search: pure `find_from` algorithm and `SearchSession` state     |
 
 ## Core types
 
-- **`EditorState`** — owns the text buffer (`ropey::Rope`), cursor position, scroll offsets, filename, file type, and
-  prompt state
+- **`EditorState`** — owns the text buffer (`ropey::Rope`), cursor position, scroll offsets, filename, file type,
+  prompt state, and an optional in-progress search (`search: Option<SearchSession>`)
 - **`EditorUi`** — owns `stdout` and a `Theme`; renders an `EditorState` to the terminal
-- **`EditorCommand`** — a small vocabulary of editor actions (move, insert, save, quit, …)
+- **`EditorCommand`** — a small vocabulary of editor actions (move, insert, save, quit, start search, …)
 - **`InputKey`** — a simplified, backend-agnostic representation of a keypress
 - **`ApplyResult`** — return value from applying a command (`NoChange`, `Changed`, `Quit`)
 - **`Theme`** — a set of named colours for foreground, background, status bar, and tilde lines
@@ -41,6 +48,8 @@ handler instead of the normal command pipeline. The prompt state is tracked via
 - **`Lexer`** (trait) — turns a single line into a sequence of `Token`s; one impl per language
 - **`Token`** — a coloured span within a line: byte offset, length, and `TokenKind`
 - **`TokenKind`** — the category of a token (`Normal`, `Number`, `Comment`, `Operator`, …)
+- **`SearchSession`** — bookkeeping for an in-progress incremental search: the query typed so
+  far and the char index the cursor started at; knows nothing about `EditorState` or cursors
 
 ## Input / event matching
 
@@ -51,6 +60,8 @@ The `Ctrl+X` prefix arms a flag (`saw_ctrl_x`); the next keypress completes the 
 - `Ctrl+C` → `Quit`
 - `Ctrl+S` → `SaveFile`
 - anything else → cancels the prefix
+
+Outside of the `Ctrl+X` prefix, plain `Ctrl+S` → `StartSearch`.
 
 ## Rendering model
 
@@ -130,6 +141,43 @@ as numbers — they're part of an identifier. Standalone literals like `42`, `(1
    `Normal` spans into keywords, types, strings, comments, etc.
 3. Add a match arm in `lexer_for_file_type()`.
 4. Add the file extension in `file_type_from_filename()` in `lib.rs`.
+
+## Incremental search
+
+Search is built as three layers, each with one job:
+
+1. **`find_from(haystack, needle, start, wrap)`** (`search.rs`) — the pure algorithm. Works in
+   char indices (not byte offsets), so callers never have to think about UTF-8. An empty
+   needle never matches (Emacs behaviour: an empty query doesn't move point).
+
+2. **`SearchSession`** (`search.rs`) — bookkeeping for one in-progress search: the `query`
+   typed so far, and the `origin` char index the cursor was at when the search began. It
+   exposes two different search policies, deliberately kept apart:
+   - `current_match(haystack)` — searches forward from `origin`, **no wraparound**. Used as
+     you type or backspace, so the match "grows" from where you started rather than drifting.
+   - `repeat_match(haystack, after)` — searches forward from `after + 1` (the position the
+     cursor is already at), **with wraparound**. Used only by the explicit "search again"
+     action, so it never re-reports the match you're already sitting on.
+
+   Both policies live here rather than in `EditorState`, because `origin` is a private field —
+   this is the only way other modules can get an answer without reaching into `SearchSession`'s
+   internals.
+
+3. **`EditorState` driver methods** — `search_start`, `search_push_char`, `search_backspace`,
+   `search_repeat`, `search_accept`, `search_cancel`, `is_searching`, `search_query`. These
+   convert a found char index into a `(cx, cy)` cursor position (`char_index_to_cursor`) and
+   move the cursor there; on no match, the cursor is left exactly where it was. `search_cancel`
+   restores the cursor to `origin`; `search_accept` just ends the session, leaving the cursor
+   at the match.
+
+`main.rs`'s `handle_search_key` maps keys to these driver methods and is the only untested
+layer — it's pure dispatch to methods that are already covered by tests, and can't
+meaningfully be unit tested itself (it needs a real `crossterm::Event`), matching how
+`handle_prompt_key` already works.
+
+The help line at the bottom of the screen shows the query while searching
+(`EditorState::status_help_line`), with priority: "Save as" prompt, then active search query,
+then the default help message.
 
 ## Terminal safety
 
