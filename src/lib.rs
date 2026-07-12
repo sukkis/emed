@@ -734,6 +734,16 @@ pub fn escapes_search(key: InputKey) -> bool {
     matches!(key, InputKey::Ctrl('q') | InputKey::Ctrl('x'))
 }
 
+/// Whether receiving this command should cancel a pending quit
+/// confirmation (the "quit N more times" counter). `NoOp` must not cancel
+/// it — arming the `C-x` prefix produces `NoOp`, and letting it cancel the
+/// counter would make completing `C-x C-c` across two key presses
+/// impossible. `Quit` itself is handled by its own branch and is never a
+/// "cancelling" command either.
+pub fn cancels_pending_quit(cmd: EditorCommand) -> bool {
+    !matches!(cmd, EditorCommand::Quit | EditorCommand::NoOp)
+}
+
 pub fn command_from_key(key: InputKey, saw_ctrl_x: &mut bool) -> EditorCommand {
     // Quit on Ctrl-Q. Alternative to C-x C-c.
     if key == InputKey::Ctrl('q') {

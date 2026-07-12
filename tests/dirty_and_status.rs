@@ -3,10 +3,27 @@
 
 use emed_core::{
     ApplyResult, DEFAULT_HELP_MESSAGE, EditorCommand, EditorState, InputKey, QUIT_CONFIRM_COUNT,
-    command_from_key,
+    cancels_pending_quit, command_from_key,
 };
 
 // quit confirmation if user has unsaved changes
+
+#[test]
+fn noop_and_quit_do_not_cancel_a_pending_quit() {
+    // NoOp is what arming the C-x prefix produces — it must not cancel
+    // the countdown, or completing C-x C-c across two key presses is
+    // impossible (the prefix key itself would reset the counter first).
+    assert!(!cancels_pending_quit(EditorCommand::NoOp));
+    // Quit itself is handled by its own branch, never this one, but it
+    // shouldn't be considered a "cancelling" command either.
+    assert!(!cancels_pending_quit(EditorCommand::Quit));
+}
+
+#[test]
+fn a_real_action_cancels_a_pending_quit() {
+    assert!(cancels_pending_quit(EditorCommand::InsertChar('a')));
+    assert!(cancels_pending_quit(EditorCommand::MoveLeft));
+}
 
 #[test]
 fn quit_warning_message_appears_and_resets_on_edit() {

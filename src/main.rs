@@ -5,7 +5,7 @@ use crossterm::{
 };
 use emed_core::{
     DEFAULT_HELP_MESSAGE, EditorCommand, EditorState, InputKey, QUIT_CONFIRM_COUNT,
-    command_from_key, escapes_search,
+    cancels_pending_quit, command_from_key, escapes_search,
 };
 use std::io::{self};
 
@@ -188,9 +188,8 @@ fn apply_command(
             }
             return Ok(true);
         }
-        // Any non-Quit command resets the quit counter.
         _ => {
-            if state.quit_count > 0 {
+            if cancels_pending_quit(cmd) && state.quit_count > 0 {
                 state.reset_quit_count();
                 state.help_message = DEFAULT_HELP_MESSAGE.to_string();
             }
