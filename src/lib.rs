@@ -712,6 +712,15 @@ impl EditorState {
 ///
 /// This function is deliberately pure (except for the `saw_ctrl_x` flag),
 /// so we can unit-test keybindings like Ctrl+X then Ctrl+C without involving crossterm.
+/// Keys that should end an active search rather than be typed into the
+/// query, because they lead toward quitting (`Ctrl-q` directly, or
+/// `Ctrl-x` which may start `C-x C-c`/`C-x C-s`). The caller should cancel
+/// the search first, then let the key be processed normally — otherwise
+/// quitting (or saving) is unreachable while a search is open.
+pub fn escapes_search(key: InputKey) -> bool {
+    matches!(key, InputKey::Ctrl('q') | InputKey::Ctrl('x'))
+}
+
 pub fn command_from_key(key: InputKey, saw_ctrl_x: &mut bool) -> EditorCommand {
     // Quit on Ctrl-Q. Alternative to C-x C-c.
     if key == InputKey::Ctrl('q') {

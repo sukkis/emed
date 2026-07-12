@@ -1,4 +1,4 @@
-use emed_core::{EditorCommand, InputKey, command_from_key};
+use emed_core::{EditorCommand, InputKey, command_from_key, escapes_search};
 
 #[test]
 fn ctrl_q_quits_immediately() {
@@ -70,6 +70,27 @@ fn plain_ctrl_s_starts_search() {
     let cmd = command_from_key(InputKey::Ctrl('s'), &mut saw_ctrl_x);
     assert_eq!(cmd, EditorCommand::StartSearch);
     assert!(!saw_ctrl_x);
+}
+
+#[test]
+fn ctrl_q_and_ctrl_x_escape_a_search() {
+    // These are the keys that should cancel an active search and fall
+    // through to normal handling, so quitting is never unreachable.
+    assert!(escapes_search(InputKey::Ctrl('q')));
+    assert!(escapes_search(InputKey::Ctrl('x')));
+}
+
+#[test]
+fn ctrl_g_does_not_escape_a_search() {
+    // C-g has its own meaning while searching (cancel back to origin,
+    // but stay in the editor) — it must not be treated as an escape key,
+    // or handle_search_key's own C-g handling would never run.
+    assert!(!escapes_search(InputKey::Ctrl('g')));
+}
+
+#[test]
+fn typing_a_character_does_not_escape_a_search() {
+    assert!(!escapes_search(InputKey::Char('a')));
 }
 
 #[test]
