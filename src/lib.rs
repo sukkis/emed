@@ -77,6 +77,7 @@ pub enum EditorCommand {
     Backspace,
     SaveFile,
     PromptSaveAs,
+    StartSearch,
     NoOp,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -363,6 +364,11 @@ impl EditorState {
                 ApplyResult::Changed
             }
             EditorCommand::SaveFile | EditorCommand::PromptSaveAs => ApplyResult::NoChange,
+
+            EditorCommand::StartSearch => {
+                self.search_start();
+                ApplyResult::Changed
+            }
 
             EditorCommand::NoOp => ApplyResult::NoChange,
         }
@@ -737,6 +743,7 @@ pub fn command_from_key(key: InputKey, saw_ctrl_x: &mut bool) -> EditorCommand {
         InputKey::Delete => EditorCommand::DeleteChar,
         InputKey::Backspace => EditorCommand::Backspace,
         InputKey::Char(c) => EditorCommand::InsertChar(c),
+        InputKey::Ctrl('s') => EditorCommand::StartSearch,
         InputKey::Ctrl(_) => EditorCommand::NoOp,
     }
 }

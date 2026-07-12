@@ -221,6 +221,10 @@ fn apply_command(
             state.backspace();
             ui.draw_screen(state)?;
         }
+        EditorCommand::StartSearch => {
+            state.search_start();
+            ui.draw_screen(state)?;
+        }
         EditorCommand::NoOp => {}
     }
     Ok(false)

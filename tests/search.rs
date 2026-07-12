@@ -6,7 +6,7 @@
 //! (needs `last_match`, added in 4b) and no `search_accept`/`search_cancel`
 //! (4c) yet.
 
-use emed_core::EditorState;
+use emed_core::{ApplyResult, EditorCommand, EditorState};
 
 #[test]
 fn typing_query_jumps_cursor_to_first_match() {
@@ -145,6 +145,17 @@ fn search_accept_keeps_cursor_at_match_and_ends_session() {
     state.search_accept();
     assert_eq!(state.cursor_pos(), (4, 0)); // stays at the match
     assert!(!state.is_searching());
+}
+
+#[test]
+fn start_search_command_begins_a_search_session() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("abc\n", Some("test.txt"));
+
+    let result = state.apply_command(EditorCommand::StartSearch);
+
+    assert!(state.is_searching());
+    assert_eq!(result, ApplyResult::Changed);
 }
 
 #[test]

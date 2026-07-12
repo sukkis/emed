@@ -62,6 +62,17 @@ fn ctrl_x_then_ctrl_s_saves_file() {
 }
 
 #[test]
+fn plain_ctrl_s_starts_search() {
+    // Regression guard: this must NOT collide with C-x C-s (save), which is
+    // covered by `ctrl_x_then_ctrl_s_saves_file` above — that test staying
+    // green alongside this one proves the prefix check still separates them.
+    let mut saw_ctrl_x = false;
+    let cmd = command_from_key(InputKey::Ctrl('s'), &mut saw_ctrl_x);
+    assert_eq!(cmd, EditorCommand::StartSearch);
+    assert!(!saw_ctrl_x);
+}
+
+#[test]
 fn ctrl_x_then_ctrl_s_does_not_interfere_with_subsequent_ctrl_x_ctrl_c() {
     let mut saw_ctrl_x = false;
 
