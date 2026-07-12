@@ -582,6 +582,21 @@ impl EditorState {
         }
     }
 
+    /// End the search, restoring the cursor to where it was when the
+    /// search began. Does nothing if no search is in progress.
+    pub fn search_cancel(&mut self) {
+        if let Some(session) = self.search.take() {
+            let (cx, cy) = self.char_index_to_cursor(session.origin());
+            self.set_cursor(cx, cy);
+            self.ensure_cursor_visible();
+        }
+    }
+
+    /// End the search, leaving the cursor at the current match.
+    pub fn search_accept(&mut self) {
+        self.search = None;
+    }
+
     pub fn is_searching(&self) -> bool {
         self.search.is_some()
     }

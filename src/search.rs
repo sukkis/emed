@@ -114,6 +114,12 @@ impl SearchSession {
     pub fn repeat_match(&self, haystack: &str, after: usize) -> Option<usize> {
         find_from(haystack, &self.query, after + 1, true)
     }
+
+    /// The char index the search began at — used to restore the cursor if
+    /// the search is cancelled.
+    pub fn origin(&self) -> usize {
+        self.origin
+    }
 }
 
 #[cfg(test)]

@@ -114,6 +114,40 @@ fn search_repeat_does_nothing_without_an_active_search() {
 }
 
 #[test]
+fn search_cancel_restores_original_cursor_and_ends_session() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("one two three\n", Some("test.txt"));
+    state.set_cursor(3, 0); // start searching from the space before "two"
+
+    state.search_start();
+    state.search_push_char('t');
+    state.search_push_char('w');
+    state.search_push_char('o');
+    assert_eq!(state.cursor_pos(), (4, 0)); // jumped forward to "two"
+
+    state.search_cancel();
+    // Restored to where the search began (3), not left at the match (4).
+    assert_eq!(state.cursor_pos(), (3, 0));
+    assert!(!state.is_searching());
+}
+
+#[test]
+fn search_accept_keeps_cursor_at_match_and_ends_session() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("one two three\n", Some("test.txt"));
+
+    state.search_start();
+    state.search_push_char('t');
+    state.search_push_char('w');
+    state.search_push_char('o');
+    assert_eq!(state.cursor_pos(), (4, 0));
+
+    state.search_accept();
+    assert_eq!(state.cursor_pos(), (4, 0)); // stays at the match
+    assert!(!state.is_searching());
+}
+
+#[test]
 fn loading_a_new_document_clears_any_active_search() {
     let mut state = EditorState::new((80, 24));
     state.load_document("abc\n", Some("test.txt"));
