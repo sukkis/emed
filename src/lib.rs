@@ -611,6 +611,19 @@ impl EditorState {
     pub fn search_query(&self) -> Option<&str> {
         self.search.as_ref().map(|session| session.query.as_str())
     }
+
+    /// What the help line at the bottom of the screen should currently
+    /// show: the "Save as" prompt input, the active search query, or the
+    /// default help message — in that priority order.
+    pub fn status_help_line(&self) -> String {
+        if let Some(ref input) = self.prompt_buffer {
+            format!("Save as: {}", input)
+        } else if let Some(query) = self.search_query() {
+            format!("I-search: {}", query)
+        } else {
+            self.help_message.clone()
+        }
+    }
     pub fn cursor_left(&mut self) {
         if self.cx > 0 {
             self.cx -= 1;

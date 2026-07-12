@@ -99,13 +99,7 @@ impl EditorUi {
         let right_part = format!("(col: {}, row: {})", cx, cy);
         let status_message = format!("{}    {}", left_part, right_part);
 
-        // When in prompt mode, show the prompt on the help line;
-        // otherwise show the normal help message.
-        let help_line = if let Some(ref input) = state.prompt_buffer {
-            format!("Save as: {}", input)
-        } else {
-            state.help_message.clone()
-        };
+        let help_line = state.status_help_line();
 
         queue!(
             self.stdout,

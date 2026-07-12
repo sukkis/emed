@@ -182,6 +182,33 @@ fn build_status_line(state: &EditorState, cols: u16, rows: u16) -> String {
 }
 
 /*==========================================================================*
+ * status_help_line: what the bottom help line should show
+ *==========================================================================*/
+#[test]
+fn status_help_line_shows_default_message_normally() {
+    let state = EditorState::new((80, 24));
+    assert_eq!(state.status_help_line(), DEFAULT_HELP_MESSAGE);
+}
+
+#[test]
+fn status_help_line_shows_save_as_prompt_when_prompting() {
+    let mut state = EditorState::new((80, 24));
+    state.prompt_buffer = Some("myfile.txt".to_string());
+    assert_eq!(state.status_help_line(), "Save as: myfile.txt");
+}
+
+#[test]
+fn status_help_line_shows_search_query_when_searching() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("bind bindings\n", Some("test.txt"));
+    state.search_start();
+    for c in "bind".chars() {
+        state.search_push_char(c);
+    }
+    assert_eq!(state.status_help_line(), "I-search: bind");
+}
+
+/*==========================================================================*
  * Status line contains coordinates and dirty marker
  *==========================================================================*/
 #[test]
