@@ -5,7 +5,7 @@ use crossterm::{
 };
 use emed_core::{
     DEFAULT_HELP_MESSAGE, EditorCommand, EditorState, InputKey, QUIT_CONFIRM_COUNT,
-    command_from_key,
+    cancels_pending_quit, command_from_key, escapes_search,
 };
 use std::io::{self};
 
@@ -85,6 +85,26 @@ fn handle_prompt_key(
             Ok(false)
         }
     }
+}
+
+/// Handle a keypress while an incremental search is in progress.
+///
+/// Mirrors `handle_prompt_key`'s shape. It doesn't need a "finished"
+/// return value the way that function nominally does (and which its
+/// caller doesn't actually use): `state.is_searching()` is checked fresh
+/// on the next loop iteration, same as `prompt_buffer.is_some()` already
+/// is. `draw_screen` is called once at the end, since every branch here
+/// ends up wanting one redraw.
+fn handle_search_key(key: InputKey, ui: &mut EditorUi, state: &mut EditorState) -> io::Result<()> {
+    match key {
+        InputKey::Char(c) => state.search_push_char(c),
+        InputKey::Backspace => state.search_backspace(),
+        InputKey::Ctrl('s') => state.search_repeat(),
+        InputKey::Enter => state.search_accept(),
+        InputKey::Ctrl('g') => state.search_cancel(),
+        _ => {} // ignore other keys while searching
+    }
+    ui.draw_screen(state)
 }
 
 // Convert crossterm events into a simplified, editor-owned input representation.
@@ -168,9 +188,8 @@ fn apply_command(
             }
             return Ok(true);
         }
-        // Any non-Quit command resets the quit counter.
         _ => {
-            if state.quit_count > 0 {
+            if cancels_pending_quit(cmd) && state.quit_count > 0 {
                 state.reset_quit_count();
                 state.help_message = DEFAULT_HELP_MESSAGE.to_string();
             }
@@ -219,6 +238,10 @@ fn apply_command(
         }
         EditorCommand::Backspace => {
             state.backspace();
+            ui.draw_screen(state)?;
+        }
+        EditorCommand::StartSearch => {
+            state.search_start();
             ui.draw_screen(state)?;
         }
         EditorCommand::NoOp => {}
@@ -291,6 +314,28 @@ fn run_editor(args: &Args, ui: &mut EditorUi, user_defined_tab_width: &str) -> i
         if state.prompt_buffer.is_some() {
             if let Some(key) = to_input_key(event) {
                 handle_prompt_key(key, ui, &mut state)?;
+            }
+            continue;
+        }
+
+        if state.is_searching() {
+            let Some(key) = to_input_key(event) else {
+                continue;
+            };
+
+            if escapes_search(key) {
+                // Cancel the search, then fall through to normal handling
+                // below — otherwise quitting (or saving) mid-search would
+                // be unreachable, since handle_search_key doesn't know
+                // about them.
+                state.search_cancel();
+                let cmd = command_from_key(key, &mut saw_ctrl_x);
+                let should_quit = apply_command(cmd, ui, &mut state)?;
+                if should_quit {
+                    break;
+                }
+            } else {
+                handle_search_key(key, ui, &mut state)?;
             }
             continue;
         }

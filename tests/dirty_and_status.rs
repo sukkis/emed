@@ -3,10 +3,27 @@
 
 use emed_core::{
     ApplyResult, DEFAULT_HELP_MESSAGE, EditorCommand, EditorState, InputKey, QUIT_CONFIRM_COUNT,
-    command_from_key,
+    cancels_pending_quit, command_from_key,
 };
 
 // quit confirmation if user has unsaved changes
+
+#[test]
+fn noop_and_quit_do_not_cancel_a_pending_quit() {
+    // NoOp is what arming the C-x prefix produces — it must not cancel
+    // the countdown, or completing C-x C-c across two key presses is
+    // impossible (the prefix key itself would reset the counter first).
+    assert!(!cancels_pending_quit(EditorCommand::NoOp));
+    // Quit itself is handled by its own branch, never this one, but it
+    // shouldn't be considered a "cancelling" command either.
+    assert!(!cancels_pending_quit(EditorCommand::Quit));
+}
+
+#[test]
+fn a_real_action_cancels_a_pending_quit() {
+    assert!(cancels_pending_quit(EditorCommand::InsertChar('a')));
+    assert!(cancels_pending_quit(EditorCommand::MoveLeft));
+}
 
 #[test]
 fn quit_warning_message_appears_and_resets_on_edit() {
@@ -179,6 +196,33 @@ fn build_status_line(state: &EditorState, cols: u16, rows: u16) -> String {
     // combine and pad to the full terminal width
     let combined = format!("{} {}", left, right);
     fit_to_width(&combined, cols as usize)
+}
+
+/*==========================================================================*
+ * status_help_line: what the bottom help line should show
+ *==========================================================================*/
+#[test]
+fn status_help_line_shows_default_message_normally() {
+    let state = EditorState::new((80, 24));
+    assert_eq!(state.status_help_line(), DEFAULT_HELP_MESSAGE);
+}
+
+#[test]
+fn status_help_line_shows_save_as_prompt_when_prompting() {
+    let mut state = EditorState::new((80, 24));
+    state.prompt_buffer = Some("myfile.txt".to_string());
+    assert_eq!(state.status_help_line(), "Save as: myfile.txt");
+}
+
+#[test]
+fn status_help_line_shows_search_query_when_searching() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("bind bindings\n", Some("test.txt"));
+    state.search_start();
+    for c in "bind".chars() {
+        state.search_push_char(c);
+    }
+    assert_eq!(state.status_help_line(), "I-search: bind");
 }
 
 /*==========================================================================*

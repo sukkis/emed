@@ -1,6 +1,8 @@
 pub mod lexer;
+pub mod search;
 use lexer::{Lexer, Token, lexer_for_file_type};
 use ropey::{Rope, RopeSlice};
+use search::SearchSession;
 use std::path::Path;
 use unicode_width::UnicodeWidthChar;
 
@@ -45,6 +47,8 @@ pub struct EditorState {
     /// Invalidated on any edit (initially just clear the whole vec;
     /// later we can do smarter incremental invalidation).
     token_cache: Vec<Vec<Token>>,
+    /// When `Some`, an incremental search is in progress.
+    search: Option<SearchSession>,
 }
 
 /// High-level actions the editor understands.
@@ -73,6 +77,7 @@ pub enum EditorCommand {
     Backspace,
     SaveFile,
     PromptSaveAs,
+    StartSearch,
     NoOp,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,6 +151,7 @@ impl EditorState {
             tab_width: 4,
             lexer: Some(lexer_for_file_type(&FileType::Unknown)),
             token_cache: vec![Vec::new(); 1], // Rope::new() has 1 line
+            search: None,
         }
     }
 
@@ -313,6 +319,7 @@ impl EditorState {
         self.row_offset = 0;
         self.ensure_cursor_visible();
         self.clear_dirty();
+        self.search = None;
     }
 
     /// Apply an `EditorCommand` to `EditorState` (no UI, no IO).
@@ -357,6 +364,11 @@ impl EditorState {
                 ApplyResult::Changed
             }
             EditorCommand::SaveFile | EditorCommand::PromptSaveAs => ApplyResult::NoChange,
+
+            EditorCommand::StartSearch => {
+                self.search_start();
+                ApplyResult::Changed
+            }
 
             EditorCommand::NoOp => ApplyResult::NoChange,
         }
@@ -506,6 +518,112 @@ impl EditorState {
     pub fn cursor_pos(&self) -> (usize, usize) {
         (self.cx, self.cy)
     }
+
+    /// Convert a char index into the buffer into a `(cx, cy)` cursor
+    /// position. An index at or past the end of the buffer clamps to
+    /// `len_chars()`, which lands on the trailing empty line ropey adds
+    /// after a final `\n`.
+    pub fn char_index_to_cursor(&self, idx: usize) -> (usize, usize) {
+        let idx = idx.min(self.text.len_chars());
+        let cy = self.text.char_to_line(idx);
+        let cx = idx - self.text.line_to_char(cy);
+        (cx, cy)
+    }
+
+    /// Begin an incremental search, anchored at the current cursor position.
+    pub fn search_start(&mut self) {
+        let origin = self.text.line_to_char(self.cy) + self.cx;
+        self.search = Some(SearchSession::new(origin));
+    }
+
+    /// Re-run the active session's match against the whole buffer and, if it
+    /// found something, move the cursor there. No match leaves the cursor
+    /// exactly where it was.
+    fn refresh_search_match(&mut self) {
+        let query_match = match self.search.as_ref() {
+            Some(session) => session.current_match(&self.save_to_string()),
+            None => return,
+        };
+
+        if let Some(idx) = query_match {
+            let (cx, cy) = self.char_index_to_cursor(idx);
+            self.set_cursor(cx, cy);
+            self.ensure_cursor_visible();
+        }
+    }
+
+    /// Append a character to the active search query and jump to the match,
+    /// if any. Does nothing if no search is in progress.
+    pub fn search_push_char(&mut self, c: char) {
+        if let Some(session) = self.search.as_mut() {
+            session.push_char(c);
+        }
+        self.refresh_search_match();
+    }
+
+    /// Remove the last character from the active search query and re-match.
+    /// Does nothing if no search is in progress.
+    pub fn search_backspace(&mut self) {
+        if let Some(session) = self.search.as_mut() {
+            session.backspace();
+        }
+        self.refresh_search_match();
+    }
+
+    /// Move to the next occurrence of the active query, wrapping around
+    /// the buffer if necessary. Does nothing if no search is in progress.
+    pub fn search_repeat(&mut self) {
+        let next_match = match self.search.as_ref() {
+            Some(session) => {
+                let current = self.text.line_to_char(self.cy) + self.cx;
+                session.repeat_match(&self.save_to_string(), current)
+            }
+            None => return,
+        };
+
+        if let Some(idx) = next_match {
+            let (cx, cy) = self.char_index_to_cursor(idx);
+            self.set_cursor(cx, cy);
+            self.ensure_cursor_visible();
+        }
+    }
+
+    /// End the search, restoring the cursor to where it was when the
+    /// search began. Does nothing if no search is in progress.
+    pub fn search_cancel(&mut self) {
+        if let Some(session) = self.search.take() {
+            let (cx, cy) = self.char_index_to_cursor(session.origin());
+            self.set_cursor(cx, cy);
+            self.ensure_cursor_visible();
+        }
+    }
+
+    /// End the search, leaving the cursor at the current match.
+    pub fn search_accept(&mut self) {
+        self.search = None;
+    }
+
+    pub fn is_searching(&self) -> bool {
+        self.search.is_some()
+    }
+
+    /// The query typed so far, or `None` if no search is in progress.
+    pub fn search_query(&self) -> Option<&str> {
+        self.search.as_ref().map(|session| session.query.as_str())
+    }
+
+    /// What the help line at the bottom of the screen should currently
+    /// show: the "Save as" prompt input, the active search query, or the
+    /// default help message — in that priority order.
+    pub fn status_help_line(&self) -> String {
+        if let Some(ref input) = self.prompt_buffer {
+            format!("Save as: {}", input)
+        } else if let Some(query) = self.search_query() {
+            format!("I-search: {}", query)
+        } else {
+            self.help_message.clone()
+        }
+    }
     pub fn cursor_left(&mut self) {
         if self.cx > 0 {
             self.cx -= 1;
@@ -607,6 +725,25 @@ impl EditorState {
 ///
 /// This function is deliberately pure (except for the `saw_ctrl_x` flag),
 /// so we can unit-test keybindings like Ctrl+X then Ctrl+C without involving crossterm.
+/// Keys that should end an active search rather than be typed into the
+/// query, because they lead toward quitting (`Ctrl-q` directly, or
+/// `Ctrl-x` which may start `C-x C-c`/`C-x C-s`). The caller should cancel
+/// the search first, then let the key be processed normally — otherwise
+/// quitting (or saving) is unreachable while a search is open.
+pub fn escapes_search(key: InputKey) -> bool {
+    matches!(key, InputKey::Ctrl('q') | InputKey::Ctrl('x'))
+}
+
+/// Whether receiving this command should cancel a pending quit
+/// confirmation (the "quit N more times" counter). `NoOp` must not cancel
+/// it — arming the `C-x` prefix produces `NoOp`, and letting it cancel the
+/// counter would make completing `C-x C-c` across two key presses
+/// impossible. `Quit` itself is handled by its own branch and is never a
+/// "cancelling" command either.
+pub fn cancels_pending_quit(cmd: EditorCommand) -> bool {
+    !matches!(cmd, EditorCommand::Quit | EditorCommand::NoOp)
+}
+
 pub fn command_from_key(key: InputKey, saw_ctrl_x: &mut bool) -> EditorCommand {
     // Quit on Ctrl-Q. Alternative to C-x C-c.
     if key == InputKey::Ctrl('q') {
@@ -638,6 +775,7 @@ pub fn command_from_key(key: InputKey, saw_ctrl_x: &mut bool) -> EditorCommand {
         InputKey::Delete => EditorCommand::DeleteChar,
         InputKey::Backspace => EditorCommand::Backspace,
         InputKey::Char(c) => EditorCommand::InsertChar(c),
+        InputKey::Ctrl('s') => EditorCommand::StartSearch,
         InputKey::Ctrl(_) => EditorCommand::NoOp,
     }
 }
