@@ -1,4 +1,4 @@
-use crate::Theme::{self};
+use crate::Theme;
 use crate::VERSION;
 use crossterm::style::{Attribute, Print, SetAttribute, SetBackgroundColor, SetForegroundColor};
 use crossterm::{cursor, queue, style::ResetColor, terminal};
