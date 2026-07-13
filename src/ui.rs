@@ -268,9 +268,20 @@ impl EditorUi {
         self.queue_status_information(state, cols, rows)?;
 
         let (cx, cy) = state.cursor_pos();
-        let screen_cy = cy.saturating_sub(row_offset);
-        let screen_col = state.cx_to_screen_col(cy, cx);
-        let screen_cx = screen_col.saturating_sub(col_offset);
+        let (screen_cx, screen_cy) = if state.visual_line_mode {
+            // Wrapped placement: how many rows the lines above `cy` take,
+            // plus which wrapped row/column `cx` falls in on `cy` itself.
+            let rows_before = state.screen_rows_before_line(cy, width);
+            let (row_within_line, col_within_row) = state.wrapped_cursor_offset(cy, cx, width);
+            (col_within_row, rows_before + row_within_line)
+        } else {
+            // Unchanged: one buffer line per screen row, horizontally
+            // scrolled by col_offset.
+            let screen_cy = cy.saturating_sub(row_offset);
+            let screen_col = state.cx_to_screen_col(cy, cx);
+            let screen_cx = screen_col.saturating_sub(col_offset);
+            (screen_cx, screen_cy)
+        };
         queue!(
             self.stdout,
             cursor::MoveTo(to_u16(screen_cx), to_u16(screen_cy)),
