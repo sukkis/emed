@@ -286,6 +286,85 @@ impl EditorState {
         self.render_to_width(visible_chars, screen_width)
     }
 
+    /// Word-wrap a single buffer line into chunks that each fit within
+    /// `width` display columns, for `visual_line_mode` rendering.
+    ///
+    /// Breaks at the nearest space at or before the width limit; the space
+    /// stays attached to the end of the earlier chunk, so every chunk
+    /// starts at a real character and concatenating all chunks reproduces
+    /// the original line exactly. A word with no space that is itself
+    /// longer than `width` is hard-broken, since there is no space to back
+    /// up to. This never modifies the buffer — it only reads `self.text`.
+    pub fn wrapped_lines(&self, line_index: usize, width: usize) -> Vec<String> {
+        // Nothing can ever fit in zero columns. Without this, the loop
+        // below never advances (every character overflows immediately and
+        // there's no space to break at, so `chunk_start` never moves) and
+        // spins forever. Bail out the same way an empty line already does.
+        if width == 0 {
+            return Vec::new();
+        }
+
+        // Collected (rather than iterated in place) because the algorithm
+        // needs to look backward to the last space once a chunk overflows,
+        // which a `Rope` line iterator alone doesn't support.
+        let chars: Vec<char> = self
+            .text
+            .line(line_index)
+            .chars()
+            .filter(|&c| c != '\n')
+            .collect();
+
+        let mut chunks = Vec::new();
+        // Index into `chars` where the chunk currently being built begins.
+        let mut chunk_start = 0;
+        // Display columns used so far by the current (unfinished) chunk.
+        let mut cols_used = 0;
+        // Index of the most recent space seen since `chunk_start` — the
+        // fallback break point if the chunk overflows. `None` means no
+        // space has been seen yet, so an overflow must hard-break instead.
+        let mut last_space_index: Option<usize> = None;
+        let mut i = 0;
+
+        while i < chars.len() {
+            let char_width = self.display_width(chars[i]);
+
+            if cols_used + char_width > width {
+                // This character would overflow the chunk — decide where
+                // to cut *before* it. Break just after the last space if
+                // we saw one (word-wrap); otherwise break right here, mid
+                // word, since there is nothing better to back up to.
+                let break_at = last_space_index.map_or(i, |space| space + 1);
+                chunks.push(chars[chunk_start..break_at].iter().collect());
+
+                // Start a fresh chunk at the break point. `i` is rewound
+                // to `chunk_start` (rather than left where it was) because
+                // when breaking at a space, the characters between the
+                // space and the old `i` were scanned for the chunk we just
+                // closed but never pushed anywhere — they belong to this
+                // new chunk and must be re-counted from `cols_used = 0`.
+                chunk_start = break_at;
+                i = chunk_start;
+                cols_used = 0;
+                last_space_index = None;
+                continue;
+            }
+
+            if chars[i] == ' ' {
+                last_space_index = Some(i);
+            }
+            cols_used += char_width;
+            i += 1;
+        }
+
+        // The loop only pushes a chunk when it overflows, so the final,
+        // still-open chunk (which never overflowed) is pushed here.
+        if chunk_start < chars.len() {
+            chunks.push(chars[chunk_start..].iter().collect());
+        }
+
+        chunks
+    }
+
     // Saving a file step 1, have it as a string that can be written to a file
     pub fn save_to_string(&self) -> String {
         self.text.to_string()
