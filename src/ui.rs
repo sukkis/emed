@@ -153,67 +153,115 @@ impl EditorUi {
 
         queue!(self.stdout, cursor::Hide)?;
 
-        for screen_y in 0..text_rows {
-            let line_index = row_offset + screen_y;
+        // The text area is painted one of two totally different ways,
+        // chosen once up front: `visual_line_mode` on paints precomputed
+        // wrapped rows (new, below); off paints one buffer line per screen
+        // row with horizontal scrolling (old — untouched, just now inside
+        // its own `else` arm so you don't need to re-check it line by line).
+        if state.visual_line_mode {
+            // Wrapped rendering: `wrapped_screen_rows` already decided what
+            // each screen row shows, so all this loop does is paint it.
+            // No syntax-highlight token coloring yet — deferred on purpose,
+            // see the earlier discussion about scoping this increment down.
+            let screen_rows = state.wrapped_screen_rows(text_rows, width);
 
-            queue!(self.stdout, cursor::MoveTo(0, screen_y as u16))?;
+            for (screen_y, row) in screen_rows.iter().enumerate() {
+                queue!(self.stdout, cursor::MoveTo(0, screen_y as u16))?;
 
-            queue!(
-                self.stdout,
-                terminal::Clear(terminal::ClearType::CurrentLine)
-            )?;
+                queue!(
+                    self.stdout,
+                    terminal::Clear(terminal::ClearType::CurrentLine)
+                )?;
 
-            if line_index <= state.index_of_last_line() {
-                let visible = state.get_slice(line_index, width);
+                match row {
+                    // A real row of (wrapped) buffer content.
+                    Some(chunk) => {
+                        queue!(
+                            self.stdout,
+                            SetForegroundColor(self.theme.fg.to_crossterm()),
+                            Print(chunk),
+                            terminal::Clear(terminal::ClearType::UntilNewLine)
+                        )?;
+                    }
+                    // Past the end of the buffer — same "~" filler as the
+                    // non-wrapped path below.
+                    None => {
+                        queue!(
+                            self.stdout,
+                            SetForegroundColor(self.theme.tilde_fg.to_crossterm()),
+                            Print("~"),
+                            SetForegroundColor(self.theme.fg.to_crossterm()),
+                            terminal::Clear(terminal::ClearType::UntilNewLine)
+                        )?;
+                    }
+                }
+            }
+        } else {
+            // Unchanged from before this feature existed: one buffer line
+            // per screen row, sliced and horizontally scrolled by
+            // `get_slice`/`col_offset`, with per-character token coloring.
+            for screen_y in 0..text_rows {
+                let line_index = row_offset + screen_y;
 
-                let tokens = state.tokens_for_line(line_index).to_vec();
-                if tokens.is_empty() {
-                    queue!(self.stdout, Print(&visible))?;
-                } else {
-                    for (char_idx, ch) in visible.chars().enumerate() {
-                        let buf_col = col_offset + char_idx;
+                queue!(self.stdout, cursor::MoveTo(0, screen_y as u16))?;
 
-                        let kind = tokens
-                            .iter()
-                            .find(|t| buf_col >= t.start && buf_col < t.start + t.len)
-                            .map(|t| t.kind)
-                            .unwrap_or(TokenKind::Normal);
+                queue!(
+                    self.stdout,
+                    terminal::Clear(terminal::ClearType::CurrentLine)
+                )?;
 
-                        match kind {
-                            TokenKind::Number => {
-                                queue!(
-                                    self.stdout,
-                                    SetForegroundColor(self.theme.number_fg.to_crossterm()),
-                                    Print(ch),
-                                )?;
-                            }
-                            _ => {
-                                queue!(
-                                    self.stdout,
-                                    SetForegroundColor(self.theme.fg.to_crossterm()),
-                                    Print(ch),
-                                )?;
+                if line_index <= state.index_of_last_line() {
+                    let visible = state.get_slice(line_index, width);
+
+                    let tokens = state.tokens_for_line(line_index).to_vec();
+                    if tokens.is_empty() {
+                        queue!(self.stdout, Print(&visible))?;
+                    } else {
+                        for (char_idx, ch) in visible.chars().enumerate() {
+                            let buf_col = col_offset + char_idx;
+
+                            let kind = tokens
+                                .iter()
+                                .find(|t| buf_col >= t.start && buf_col < t.start + t.len)
+                                .map(|t| t.kind)
+                                .unwrap_or(TokenKind::Normal);
+
+                            match kind {
+                                TokenKind::Number => {
+                                    queue!(
+                                        self.stdout,
+                                        SetForegroundColor(self.theme.number_fg.to_crossterm()),
+                                        Print(ch),
+                                    )?;
+                                }
+                                _ => {
+                                    queue!(
+                                        self.stdout,
+                                        SetForegroundColor(self.theme.fg.to_crossterm()),
+                                        Print(ch),
+                                    )?;
+                                }
                             }
                         }
+                        queue!(
+                            self.stdout,
+                            SetForegroundColor(self.theme.fg.to_crossterm()),
+                        )?;
                     }
+
                     queue!(
                         self.stdout,
+                        terminal::Clear(terminal::ClearType::UntilNewLine)
+                    )?;
+                } else {
+                    queue!(
+                        self.stdout,
+                        SetForegroundColor(self.theme.tilde_fg.to_crossterm()),
+                        Print("~"),
                         SetForegroundColor(self.theme.fg.to_crossterm()),
+                        terminal::Clear(terminal::ClearType::UntilNewLine)
                     )?;
                 }
-
-                queue!(
-                    self.stdout,
-                    terminal::Clear(terminal::ClearType::UntilNewLine)
-                )?;
-            } else {
-                queue!(
-                    self.stdout,
-                    SetForegroundColor(self.theme.tilde_fg.to_crossterm()),
-                    Print("~"),
-                    SetForegroundColor(self.theme.fg.to_crossterm()),
-                    terminal::Clear(terminal::ClearType::UntilNewLine)
-                )?;
             }
         }
 
