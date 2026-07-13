@@ -31,7 +31,7 @@ fn quit_warning_message_appears_and_resets_on_edit() {
     state.load_document("hello\n", Some("test.txt"));
 
     // Make the buffer dirty.
-    apply_key(&mut state, InputKey::Char('x'), &mut false);
+    apply_key(&mut state, InputKey::Char('x'), &mut false, &mut false);
     assert!(state.is_dirty());
 
     // Simulate what main.rs's apply_command does on Quit with a dirty buffer:
@@ -90,7 +90,7 @@ fn quit_on_dirty_buffer_needs_three_presses() {
     state.load_document("hello\n", Some("test.txt"));
 
     // Make it dirty.
-    apply_key(&mut state, InputKey::Char('x'), &mut false);
+    apply_key(&mut state, InputKey::Char('x'), &mut false, &mut false);
     assert!(state.is_dirty());
 
     // The core's apply_command always returns Quit for EditorCommand::Quit —
@@ -116,7 +116,7 @@ fn quit_on_dirty_buffer_needs_three_presses() {
 fn quit_count_resets_on_non_quit_action() {
     let mut state = EditorState::new((80, 24));
     state.load_document("hello\n", Some("test.txt"));
-    apply_key(&mut state, InputKey::Char('x'), &mut false);
+    apply_key(&mut state, InputKey::Char('x'), &mut false, &mut false);
 
     state.quit_count = 2; // user pressed Quit twice
     state.reset_quit_count(); // then typed a character — counter resets
@@ -127,15 +127,20 @@ fn quit_count_resets_on_non_quit_action() {
 fn quit_count_resets_on_save() {
     let mut state = EditorState::new((80, 24));
     state.load_document("hello\n", Some("test.txt"));
-    apply_key(&mut state, InputKey::Char('x'), &mut false);
+    apply_key(&mut state, InputKey::Char('x'), &mut false, &mut false);
 
     state.quit_count = 2;
     state.clear_dirty(); // save clears dirty AND resets quit_count
     assert_eq!(state.quit_count, 0);
 }
 /// Helper – run a single key through the command pipeline.
-fn apply_key(state: &mut EditorState, key: InputKey, saw_ctrl_x: &mut bool) -> ApplyResult {
-    let cmd = command_from_key(key, saw_ctrl_x);
+fn apply_key(
+    state: &mut EditorState,
+    key: InputKey,
+    saw_ctrl_x: &mut bool,
+    saw_ctrl_c: &mut bool,
+) -> ApplyResult {
+    let cmd = command_from_key(key, saw_ctrl_x, saw_ctrl_c);
     state.apply_command(cmd)
 }
 fn fit_to_width(s: &str, width: usize) -> String {
@@ -158,7 +163,7 @@ fn dirty_flag_flips_on_edit_and_resets_on_load() {
     assert!(!state.is_dirty(), "new editor should start clean");
 
     // Any mutating command makes it dirty.
-    apply_key(&mut state, InputKey::Char('a'), &mut false);
+    apply_key(&mut state, InputKey::Char('a'), &mut false, &mut false);
     assert!(state.is_dirty(), "insert_char must set dirty");
 
     // Loading a new document must clear the flag, even if it was set.
@@ -252,7 +257,7 @@ fn status_line_shows_coords_and_dirty_marker_correctly() {
     );
 
     // ---- make it dirty ---------------------------------------------------
-    apply_key(&mut state, InputKey::Char('x'), &mut false);
+    apply_key(&mut state, InputKey::Char('x'), &mut false, &mut false);
     let dirty = build_status_line(&state, cols, rows);
     assert!(
         dirty.contains("(modified)"),

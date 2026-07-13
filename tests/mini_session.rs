@@ -1,7 +1,12 @@
 use emed_core::{ApplyResult, EditorState, InputKey, command_from_key};
 
-fn run_key(state: &mut EditorState, key: InputKey, saw_ctrl_x: &mut bool) -> ApplyResult {
-    let cmd = command_from_key(key, saw_ctrl_x);
+fn run_key(
+    state: &mut EditorState,
+    key: InputKey,
+    saw_ctrl_x: &mut bool,
+    saw_ctrl_c: &mut bool,
+) -> ApplyResult {
+    let cmd = command_from_key(key, saw_ctrl_x, saw_ctrl_c);
     state.apply_command(cmd)
 }
 
@@ -11,35 +16,66 @@ fn mini_session_typing_newline_merge_and_scroll() {
     // rows=4 => text area height = 2 (rows - 2)
     let mut state = EditorState::new((80, 4));
     let mut saw_ctrl_x = false;
+    let mut saw_ctrl_c = false;
 
     // Type: "hi"
     assert_eq!(
-        run_key(&mut state, InputKey::Char('h'), &mut saw_ctrl_x),
+        run_key(
+            &mut state,
+            InputKey::Char('h'),
+            &mut saw_ctrl_x,
+            &mut saw_ctrl_c
+        ),
         ApplyResult::Changed
     );
     assert_eq!(
-        run_key(&mut state, InputKey::Char('i'), &mut saw_ctrl_x),
+        run_key(
+            &mut state,
+            InputKey::Char('i'),
+            &mut saw_ctrl_x,
+            &mut saw_ctrl_c
+        ),
         ApplyResult::Changed
     );
 
     // Enter => new line
     assert_eq!(
-        run_key(&mut state, InputKey::Enter, &mut saw_ctrl_x),
+        run_key(
+            &mut state,
+            InputKey::Enter,
+            &mut saw_ctrl_x,
+            &mut saw_ctrl_c
+        ),
         ApplyResult::Changed
     );
 
     // Type: "there"
     for c in "there".chars() {
-        run_key(&mut state, InputKey::Char(c), &mut saw_ctrl_x);
+        run_key(
+            &mut state,
+            InputKey::Char(c),
+            &mut saw_ctrl_x,
+            &mut saw_ctrl_c,
+        );
     }
 
     // Backspace 5x removes "there"
     for _ in 0..5 {
-        run_key(&mut state, InputKey::Backspace, &mut saw_ctrl_x);
+        run_key(
+            &mut state,
+            InputKey::Backspace,
+            &mut saw_ctrl_x,
+            &mut saw_ctrl_c,
+        );
     }
 
     // Backspace at start-of-line merges back into previous line (removes newline)
-    run_key(&mut state, InputKey::Backspace, &mut saw_ctrl_x);
+    run_key(
+        &mut state,
+        InputKey::Backspace,
+        &mut saw_ctrl_x,
+        &mut saw_ctrl_c,
+    );
 
     // Validate final content and cursor.
     // Buffer should now contain "hi"

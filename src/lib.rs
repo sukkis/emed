@@ -83,6 +83,7 @@ pub enum EditorCommand {
     SaveFile,
     PromptSaveAs,
     StartSearch,
+    ToggleVisualLineMode,
     NoOp,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -550,6 +551,11 @@ impl EditorState {
                 ApplyResult::Changed
             }
 
+            EditorCommand::ToggleVisualLineMode => {
+                self.visual_line_mode = !self.visual_line_mode;
+                ApplyResult::Changed
+            }
+
             EditorCommand::NoOp => ApplyResult::NoChange,
         }
     }
@@ -998,16 +1004,23 @@ pub fn cancels_pending_quit(cmd: EditorCommand) -> bool {
     !matches!(cmd, EditorCommand::Quit | EditorCommand::NoOp)
 }
 
-pub fn command_from_key(key: InputKey, saw_ctrl_x: &mut bool) -> EditorCommand {
+pub fn command_from_key(
+    key: InputKey,
+    saw_ctrl_x: &mut bool,
+    saw_ctrl_c: &mut bool,
+) -> EditorCommand {
     // Quit on Ctrl-Q. Alternative to C-x C-c.
     if key == InputKey::Ctrl('q') {
         *saw_ctrl_x = false;
+        *saw_ctrl_c = false;
         return EditorCommand::Quit;
     }
 
-    // Ctrl-X prefix handling.
+    // Ctrl-X prefix handling. Starting this prefix abandons any pending
+    // C-c prefix rather than leaving it armed for an unrelated keypress.
     if key == InputKey::Ctrl('x') {
         *saw_ctrl_x = true;
+        *saw_ctrl_c = false;
         return EditorCommand::NoOp;
     }
 
@@ -1016,6 +1029,19 @@ pub fn command_from_key(key: InputKey, saw_ctrl_x: &mut bool) -> EditorCommand {
         return match key {
             InputKey::Ctrl('c') => EditorCommand::Quit,
             InputKey::Ctrl('s') => EditorCommand::SaveFile,
+            _ => EditorCommand::NoOp,
+        };
+    }
+
+    // Ctrl-C prefix handling — a second, independent prefix (mirrors
+    // Emacs' reserved user/minor-mode C-c prefix) for editor-level
+    // toggles like `visual_line_mode`. Only reached once the C-x-prefix
+    // paths above have already returned, so `Ctrl('c')` completing
+    // `C-x C-c` (quit) can never be mistaken for a fresh C-c press here.
+    if *saw_ctrl_c {
+        *saw_ctrl_c = false;
+        return match key {
+            InputKey::Char('l') => EditorCommand::ToggleVisualLineMode,
             _ => EditorCommand::NoOp,
         };
     }
@@ -1030,6 +1056,10 @@ pub fn command_from_key(key: InputKey, saw_ctrl_x: &mut bool) -> EditorCommand {
         InputKey::Backspace => EditorCommand::Backspace,
         InputKey::Char(c) => EditorCommand::InsertChar(c),
         InputKey::Ctrl('s') => EditorCommand::StartSearch,
+        InputKey::Ctrl('c') => {
+            *saw_ctrl_c = true;
+            EditorCommand::NoOp
+        }
         InputKey::Ctrl(_) => EditorCommand::NoOp,
     }
 }
