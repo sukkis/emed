@@ -1,9 +1,9 @@
 use emed_core::{EditorCommand, EditorState, InputKey, command_from_key};
 
 /// Simulate C-x C-s and return the resulting command.
-fn press_ctrl_x_ctrl_s(saw_ctrl_x: &mut bool) -> EditorCommand {
-    let _ = command_from_key(InputKey::Ctrl('x'), saw_ctrl_x);
-    command_from_key(InputKey::Ctrl('s'), saw_ctrl_x)
+fn press_ctrl_x_ctrl_s(saw_ctrl_x: &mut bool, saw_ctrl_c: &mut bool) -> EditorCommand {
+    let _ = command_from_key(InputKey::Ctrl('x'), saw_ctrl_x, saw_ctrl_c);
+    command_from_key(InputKey::Ctrl('s'), saw_ctrl_x, saw_ctrl_c)
 }
 
 // -- Prompt-mode state machine tests --
@@ -16,7 +16,8 @@ fn save_with_known_filename_does_not_enter_prompt() {
     state.load_document("hello\n", Some("test.txt"));
 
     let mut saw_ctrl_x = false;
-    let cmd = press_ctrl_x_ctrl_s(&mut saw_ctrl_x);
+    let mut saw_ctrl_c = false;
+    let cmd = press_ctrl_x_ctrl_s(&mut saw_ctrl_x, &mut saw_ctrl_c);
     assert_eq!(cmd, EditorCommand::SaveFile);
 
     // With a known filename, prompt_buffer should stay None.

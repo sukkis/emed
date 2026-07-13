@@ -15,8 +15,9 @@ fn apply_key(
     state: &mut EditorState,
     key: InputKey,
     saw_ctrl_x: &mut bool,
+    saw_ctrl_c: &mut bool,
 ) -> emed_core::ApplyResult {
-    let cmd = command_from_key(key, saw_ctrl_x);
+    let cmd = command_from_key(key, saw_ctrl_x, saw_ctrl_c);
     state.apply_command(cmd)
 }
 
@@ -40,7 +41,7 @@ fn col_offset_advances_when_cursor_exceeds_screen_width() {
 
     // Move the cursor right 6 times – that is one column beyond the 5‑col window.
     for _ in 0..6 {
-        apply_key(&mut state, InputKey::Right, &mut false);
+        apply_key(&mut state, InputKey::Right, &mut false, &mut false);
     }
 
     // After the sixth move the cursor column should be 6,
@@ -62,7 +63,7 @@ fn get_slice_respects_col_offset_and_width() {
     // Put the cursor far to the right so that `col_offset` becomes non‑zero.
     // We'll move the cursor to column 20.
     for _ in 0..20 {
-        apply_key(&mut state, InputKey::Right, &mut false);
+        apply_key(&mut state, InputKey::Right, &mut false, &mut false);
     }
 
     // At this point:
@@ -109,7 +110,7 @@ fn horizontal_and_vertical_scrolling_combined() {
     // Move cursor to the far‑right of the first line (col 20).
     // The line has 20 ‘a’s, so after 20 Right presses the cursor sits at the end.
     for _ in 0..20 {
-        apply_key(&mut state, InputKey::Right, &mut false);
+        apply_key(&mut state, InputKey::Right, &mut false, &mut false);
     }
 
     // At this point the calculated offset is:
@@ -117,7 +118,7 @@ fn horizontal_and_vertical_scrolling_combined() {
     assert_eq!(state.col_offset(), 16);
 
     // Now move the cursor down one line – this forces a vertical scroll.
-    apply_key(&mut state, InputKey::Down, &mut false);
+    apply_key(&mut state, InputKey::Down, &mut false, &mut false);
 
     // Verify both offsets are non‑zero (vertical scroll happened, horizontal stayed).
     assert_eq!(state.row_offset(), 0);
@@ -177,13 +178,13 @@ fn col_offset_snaps_back_when_cursor_moves_left() {
 
     // Move right to trigger scroll
     for _ in 0..10 {
-        apply_key(&mut state, InputKey::Right, &mut false);
+        apply_key(&mut state, InputKey::Right, &mut false, &mut false);
     }
     assert!(state.col_offset() > 0);
 
     // Move all the way back left
     for _ in 0..10 {
-        apply_key(&mut state, InputKey::Left, &mut false);
+        apply_key(&mut state, InputKey::Left, &mut false, &mut false);
     }
 
     assert_eq!(state.cursor_pos(), (0, 0));
@@ -249,7 +250,7 @@ fn horizontal_scroll_with_tabs() {
 
     // Move right past the tab and all of "Hello" (5 chars) → cx=6
     for _ in 0..6 {
-        apply_key(&mut state, InputKey::Right, &mut false);
+        apply_key(&mut state, InputKey::Right, &mut false, &mut false);
     }
 
     // cx=6, screen_col = state.tab_width + 5 = 9, fits in 10-col screen → no scroll
@@ -267,8 +268,8 @@ fn horizontal_scroll_with_tabs() {
     state2.load_document("\tab\n", Some("tab2.txt"));
 
     // Move right twice: past tab and 'a' → cx=2, screen_col = state.tab_width + 1 = 5
-    apply_key(&mut state2, InputKey::Right, &mut false);
-    apply_key(&mut state2, InputKey::Right, &mut false);
+    apply_key(&mut state2, InputKey::Right, &mut false, &mut false);
+    apply_key(&mut state2, InputKey::Right, &mut false, &mut false);
     assert_eq!(state2.cursor_pos().0, 2);
     assert_eq!(state2.cx_to_screen_col(0, 2), state.tab_width + 1);
     // 5 < 6, so no scroll yet
@@ -283,8 +284,8 @@ fn horizontal_scroll_with_tabs() {
     let mut state3 = EditorState::new((6, 24));
     state3.load_document("\t\tab\n", Some("tab3.txt"));
 
-    apply_key(&mut state3, InputKey::Right, &mut false);
-    apply_key(&mut state3, InputKey::Right, &mut false);
+    apply_key(&mut state3, InputKey::Right, &mut false, &mut false);
+    apply_key(&mut state3, InputKey::Right, &mut false, &mut false);
     assert_eq!(state3.col_offset(), 3);
 
     // get_slice with col_offset=3, width=6:

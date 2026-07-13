@@ -179,6 +179,51 @@ The help line at the bottom of the screen shows the query while searching
 (`EditorState::status_help_line`), with priority: "Save as" prompt, then active search query,
 then the default help message.
 
+## Soft line wrapping (`visual_line_mode`)
+
+Toggled with `C-c l` (`EditorCommand::ToggleVisualLineMode`, handled identically — two
+independent, exhaustive matches — in both `main.rs::apply_command`, the real event loop, and
+`EditorState::apply_command`, which exists only so tests can drive it). Off by default,
+configurable via `settings.toml`.
+
+Built in layers, each a pure function of the buffer plus a width, so the whole thing is
+unit-testable without a terminal:
+
+1. **`wrapped_lines(line_index, width)`** — word-wrap for a single buffer line into a
+   `Vec<String>` of chunks. Breaks at the nearest preceding space (the space stays attached to
+   the end of the earlier chunk); hard-breaks a single word longer than `width` with nothing
+   better to back up to. Guards `width == 0` to avoid an infinite loop.
+2. **`wrapped_screen_rows(height, width)`** — composes `wrapped_lines` across every buffer line
+   from `row_offset` into the flat list of screen rows `draw_screen` paints, as `WrappedRow {
+   line_index, start_col, text }` (`src/wrap.rs`). Carrying `line_index`/`start_col` (not just
+   the chunk text) is what lets `draw_screen` reconstruct each character's buffer column —
+   `start_col + char_idx` — and look up its syntax-highlight token the same way the unwrapped
+   path does with `col_offset + char_idx`. A blank line is still 1 row, not 0 (otherwise
+   everything below it would shift up). Known limitation: if a line's chunks don't fully fit in
+   the remaining rows, the rest are clipped — `row_offset` is a buffer-line index, not a
+   visual-row index.
+3. **Buffer ↔ screen position mapping**, needed because the terminal cursor is a screen
+   position but `EditorState` tracks a buffer position (`cx`, `cy`):
+   - `screen_rows_before_line(line_index, width)` — the Y half: how many wrapped rows the lines
+     from `row_offset` up to `line_index` occupy.
+   - `wrapped_cursor_offset(line_index, cx, width)` — the X half: which wrapped chunk `cx` falls
+     in, and the column within it. A `cx` sitting exactly on a chunk boundary belongs to the
+     *start* of the next chunk, not the end of the previous one.
+   - `char_offset_for_col` / `chars_before_chunk` (private) — the inverse of the above, used to
+     turn a wrapped-row Up/Down move back into a buffer `cx`.
+   Both directions are exercised by `draw_screen`'s cursor placement and by
+   `cursor_up`/`cursor_down`, which move by wrapped chunk instead of whole buffer line when
+   `visual_line_mode` is on (no "goal column" memory across repeated moves — matches the
+   existing plain `cursor_up`/`cursor_down`, which don't track one either).
+4. **Status bar** — `status_line()` appends a `(wrap)` tag when `visual_line_mode` is on, using
+   the same "only shown when true" idiom as the `(modified)` tag.
+
+Deliberately out of scope for now: an indent-aware wrap prefix for continuation lines (matching
+the line's own leading whitespace, à la Emacs 30's `visual-wrap-prefix-mode`) — this would
+require every mapping function above to account for a narrower usable width and a column offset
+on continuation chunks, so it's planned as a separate, later config toggle rather than bolted on
+here.
+
 ## Terminal safety
 
 The main function wraps the editor loop in `std::panic::catch_unwind` so that

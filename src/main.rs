@@ -146,12 +146,12 @@ fn to_input_key(event: Event) -> Option<InputKey> {
 ///
 /// This is now a thin adapter:
 /// `crossterm::Event` → `InputKey` → `EditorCommand` (via emed_core).
-fn command_from_event(event: Event, saw_ctrl_x: &mut bool) -> EditorCommand {
+fn command_from_event(event: Event, saw_ctrl_x: &mut bool, saw_ctrl_c: &mut bool) -> EditorCommand {
     let Some(key) = to_input_key(event) else {
         return EditorCommand::NoOp;
     };
 
-    command_from_key(key, saw_ctrl_x)
+    command_from_key(key, saw_ctrl_x, saw_ctrl_c)
 }
 
 /// Executes an `EditorCommand`.
@@ -244,6 +244,10 @@ fn apply_command(
             state.search_start();
             ui.draw_screen(state)?;
         }
+        EditorCommand::ToggleVisualLineMode => {
+            state.visual_line_mode = !state.visual_line_mode;
+            ui.draw_screen(state)?;
+        }
         EditorCommand::NoOp => {}
     }
     Ok(false)
@@ -267,6 +271,7 @@ fn main() -> io::Result<()> {
     let settings = settings::load_settings(&toml_content);
     let user_defined_theme = settings.get("theme").unwrap();
     let user_defined_tab_width = settings.get("tab_width").unwrap();
+    let user_defined_visual_line_mode = settings.get("visual_line_mode").unwrap();
     let mut ui = EditorUi::new(stdout, Theme::from_name(user_defined_theme));
 
     terminal::enable_raw_mode()?;
@@ -274,7 +279,12 @@ fn main() -> io::Result<()> {
     // Run the editor in a closure so we can always clean up,
     // even if something panics or returns an error.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        run_editor(&args, &mut ui, user_defined_tab_width)
+        run_editor(
+            &args,
+            &mut ui,
+            user_defined_tab_width,
+            user_defined_visual_line_mode,
+        )
     }));
 
     // Always clean up the terminal, no matter what happened.
@@ -289,7 +299,12 @@ fn main() -> io::Result<()> {
     }
 }
 
-fn run_editor(args: &Args, ui: &mut EditorUi, user_defined_tab_width: &str) -> io::Result<()> {
+fn run_editor(
+    args: &Args,
+    ui: &mut EditorUi,
+    user_defined_tab_width: &str,
+    user_defined_visual_line_mode: &str,
+) -> io::Result<()> {
     let screen_size = terminal::size()?;
 
     ui.print_editor_version(screen_size.0, screen_size.1)?;
@@ -297,6 +312,7 @@ fn run_editor(args: &Args, ui: &mut EditorUi, user_defined_tab_width: &str) -> i
 
     let mut state = EditorState::new(screen_size);
     state.tab_width = user_defined_tab_width.parse::<usize>().unwrap();
+    state.visual_line_mode = user_defined_visual_line_mode.parse::<bool>().unwrap();
 
     // If we have an argument, load the file.
     if let Some(path) = args.file.as_deref() {
@@ -307,6 +323,7 @@ fn run_editor(args: &Args, ui: &mut EditorUi, user_defined_tab_width: &str) -> i
     ui.draw_screen(&mut state)?;
 
     let mut saw_ctrl_x = false;
+    let mut saw_ctrl_c = false;
 
     loop {
         let event = read()?;
@@ -329,7 +346,7 @@ fn run_editor(args: &Args, ui: &mut EditorUi, user_defined_tab_width: &str) -> i
                 // be unreachable, since handle_search_key doesn't know
                 // about them.
                 state.search_cancel();
-                let cmd = command_from_key(key, &mut saw_ctrl_x);
+                let cmd = command_from_key(key, &mut saw_ctrl_x, &mut saw_ctrl_c);
                 let should_quit = apply_command(cmd, ui, &mut state)?;
                 if should_quit {
                     break;
@@ -340,7 +357,7 @@ fn run_editor(args: &Args, ui: &mut EditorUi, user_defined_tab_width: &str) -> i
             continue;
         }
 
-        let cmd = command_from_event(event, &mut saw_ctrl_x);
+        let cmd = command_from_event(event, &mut saw_ctrl_x, &mut saw_ctrl_c);
         let should_quit = apply_command(cmd, ui, &mut state)?;
         if should_quit {
             break;

@@ -1,5 +1,6 @@
 pub mod lexer;
 pub mod search;
+pub mod wrap;
 use lexer::{Lexer, Token, lexer_for_file_type};
 use ropey::{Rope, RopeSlice};
 use search::SearchSession;
@@ -41,6 +42,11 @@ pub struct EditorState {
     /// When this reaches QUIT_CONFIRM_COUNT the editor actually exits.
     pub quit_count: u8,
     pub tab_width: usize,
+    /// Whether long lines wrap at word boundaries instead of scrolling
+    /// horizontally. Mirrors Emacs' `visual-line-mode`. Rendering support
+    /// for this is not wired up yet — for now it's just a flag with a
+    /// default and a settings-file override.
+    pub visual_line_mode: bool,
     /// Syntax lexer chosen based on `file_type`.  `None` = no highlighting.
     lexer: Option<Box<dyn Lexer>>,
     /// Per-line token cache.  `token_cache[i]` holds the tokens for line `i`.
@@ -78,6 +84,7 @@ pub enum EditorCommand {
     SaveFile,
     PromptSaveAs,
     StartSearch,
+    ToggleVisualLineMode,
     NoOp,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,6 +156,7 @@ impl EditorState {
             dirty: false,
             quit_count: 0,
             tab_width: 4,
+            visual_line_mode: false,
             lexer: Some(lexer_for_file_type(&FileType::Unknown)),
             token_cache: vec![Vec::new(); 1], // Rope::new() has 1 line
             search: None,
@@ -367,6 +375,11 @@ impl EditorState {
 
             EditorCommand::StartSearch => {
                 self.search_start();
+                ApplyResult::Changed
+            }
+
+            EditorCommand::ToggleVisualLineMode => {
+                self.visual_line_mode = !self.visual_line_mode;
                 ApplyResult::Changed
             }
 
@@ -624,6 +637,37 @@ impl EditorState {
             self.help_message.clone()
         }
     }
+
+    /// The status bar text: file type, line/char counts, `(wrap)` and
+    /// `(modified)` flags, quit countdown, and cursor position. Rendering
+    /// (padding to terminal width) is a `ui.rs` concern; this is just the
+    /// string.
+    pub fn status_line(&self) -> String {
+        let filetype_str = self.file_type.as_str();
+        let cx = self.cursor_pos().0;
+        let cy = self.cursor_pos().1;
+
+        let mut left_part = format!(
+            "{}: {} lines, {} chars",
+            filetype_str,
+            self.index_of_last_line() + 1,
+            self.char_count()
+        );
+        if self.visual_line_mode {
+            left_part.push_str(" (wrap)");
+        }
+        if self.is_dirty() {
+            left_part.push_str(" (modified) ");
+        }
+
+        if self.quit_count > 0 {
+            left_part.push_str(&format!(" ({} more quit(s) to discard)", self.quit_count));
+        }
+
+        let right_part = format!("(col: {}, row: {})", cx, cy);
+        format!("{}    {}", left_part, right_part)
+    }
+
     pub fn cursor_left(&mut self) {
         if self.cx > 0 {
             self.cx -= 1;
@@ -647,19 +691,24 @@ impl EditorState {
     }
 
     pub fn cursor_up(&mut self) {
-        if self.cy > 0 {
+        if self.visual_line_mode {
+            self.move_cursor_visual_up();
+        } else if self.cy > 0 {
             self.cy -= 1;
             self.cx = self.cx.min(self.current_line_len());
         }
         self.ensure_cursor_visible();
     }
     pub fn cursor_down(&mut self) {
-        if self.cy < self.index_of_last_line() {
+        if self.visual_line_mode {
+            self.move_cursor_visual_down();
+        } else if self.cy < self.index_of_last_line() {
             self.cy += 1;
             self.cx = self.cx.min(self.current_line_len());
         }
         self.ensure_cursor_visible();
     }
+
     pub fn current_line(&self) -> RopeSlice<'_> {
         self.text.line(self.cy)
     }
@@ -744,16 +793,23 @@ pub fn cancels_pending_quit(cmd: EditorCommand) -> bool {
     !matches!(cmd, EditorCommand::Quit | EditorCommand::NoOp)
 }
 
-pub fn command_from_key(key: InputKey, saw_ctrl_x: &mut bool) -> EditorCommand {
+pub fn command_from_key(
+    key: InputKey,
+    saw_ctrl_x: &mut bool,
+    saw_ctrl_c: &mut bool,
+) -> EditorCommand {
     // Quit on Ctrl-Q. Alternative to C-x C-c.
     if key == InputKey::Ctrl('q') {
         *saw_ctrl_x = false;
+        *saw_ctrl_c = false;
         return EditorCommand::Quit;
     }
 
-    // Ctrl-X prefix handling.
+    // Ctrl-X prefix handling. Starting this prefix abandons any pending
+    // C-c prefix rather than leaving it armed for an unrelated keypress.
     if key == InputKey::Ctrl('x') {
         *saw_ctrl_x = true;
+        *saw_ctrl_c = false;
         return EditorCommand::NoOp;
     }
 
@@ -762,6 +818,19 @@ pub fn command_from_key(key: InputKey, saw_ctrl_x: &mut bool) -> EditorCommand {
         return match key {
             InputKey::Ctrl('c') => EditorCommand::Quit,
             InputKey::Ctrl('s') => EditorCommand::SaveFile,
+            _ => EditorCommand::NoOp,
+        };
+    }
+
+    // Ctrl-C prefix handling — a second, independent prefix (mirrors
+    // Emacs' reserved user/minor-mode C-c prefix) for editor-level
+    // toggles like `visual_line_mode`. Only reached once the C-x-prefix
+    // paths above have already returned, so `Ctrl('c')` completing
+    // `C-x C-c` (quit) can never be mistaken for a fresh C-c press here.
+    if *saw_ctrl_c {
+        *saw_ctrl_c = false;
+        return match key {
+            InputKey::Char('l') => EditorCommand::ToggleVisualLineMode,
             _ => EditorCommand::NoOp,
         };
     }
@@ -776,6 +845,10 @@ pub fn command_from_key(key: InputKey, saw_ctrl_x: &mut bool) -> EditorCommand {
         InputKey::Backspace => EditorCommand::Backspace,
         InputKey::Char(c) => EditorCommand::InsertChar(c),
         InputKey::Ctrl('s') => EditorCommand::StartSearch,
+        InputKey::Ctrl('c') => {
+            *saw_ctrl_c = true;
+            EditorCommand::NoOp
+        }
         InputKey::Ctrl(_) => EditorCommand::NoOp,
     }
 }
@@ -783,6 +856,13 @@ pub fn command_from_key(key: InputKey, saw_ctrl_x: &mut bool) -> EditorCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn new_editor_state_defaults_to_visual_line_mode_off() {
+        let state = EditorState::new((80, 24));
+
+        assert!(!state.visual_line_mode);
+    }
+
     #[test]
     fn last_line_index_is_lines_minus_one_with_four_lines() {
         // initialize state with one line
