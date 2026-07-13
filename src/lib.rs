@@ -810,6 +810,37 @@ impl EditorState {
             self.help_message.clone()
         }
     }
+
+    /// The status bar text: file type, line/char counts, `(wrap)` and
+    /// `(modified)` flags, quit countdown, and cursor position. Rendering
+    /// (padding to terminal width) is a `ui.rs` concern; this is just the
+    /// string.
+    pub fn status_line(&self) -> String {
+        let filetype_str = self.file_type.as_str();
+        let cx = self.cursor_pos().0;
+        let cy = self.cursor_pos().1;
+
+        let mut left_part = format!(
+            "{}: {} lines, {} chars",
+            filetype_str,
+            self.index_of_last_line() + 1,
+            self.char_count()
+        );
+        if self.visual_line_mode {
+            left_part.push_str(" (wrap)");
+        }
+        if self.is_dirty() {
+            left_part.push_str(" (modified) ");
+        }
+
+        if self.quit_count > 0 {
+            left_part.push_str(&format!(" ({} more quit(s) to discard)", self.quit_count));
+        }
+
+        let right_part = format!("(col: {}, row: {})", cx, cy);
+        format!("{}    {}", left_part, right_part)
+    }
+
     pub fn cursor_left(&mut self) {
         if self.cx > 0 {
             self.cx -= 1;

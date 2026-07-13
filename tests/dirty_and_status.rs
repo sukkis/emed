@@ -143,15 +143,6 @@ fn apply_key(
     let cmd = command_from_key(key, saw_ctrl_x, saw_ctrl_c);
     state.apply_command(cmd)
 }
-fn fit_to_width(s: &str, width: usize) -> String {
-    let mut out: String = s.chars().take(width).collect();
-    let len = out.chars().count();
-    if len < width {
-        out.extend(std::iter::repeat(' ').take(width - len));
-    }
-    out
-}
-
 /*==========================================================================*
  * Dirty‑flag basics
  *==========================================================================*/
@@ -169,38 +160,6 @@ fn dirty_flag_flips_on_edit_and_resets_on_load() {
     // Loading a new document must clear the flag, even if it was set.
     state.load_document("some text\n", Some("tmp.txt"));
     assert!(!state.is_dirty(), "load_document must reset dirty flag");
-}
-
-/*==========================================================================*
- * Helper that builds the exact status line string
- *==========================================================================*/
-fn build_status_line(state: &EditorState, cols: u16, rows: u16) -> String {
-    // This reproduces the logic from `EditorUi::queue_status_information`
-    // but returns the final string instead of sending it to the terminal.
-    let filetype = state.file_type.as_str();
-
-    // cursor coordinates (1‑based for the user)
-    let (cx, cy) = state.cursor_pos();
-    let col_disp = cx + 1;
-    let row_disp = cy + 1;
-
-    // left‑hand part (file info + optional dirty flag)
-    let mut left = format!(
-        "{}: {} lines, {} chars",
-        filetype,
-        state.index_of_last_line() + 1,
-        state.char_count()
-    );
-    if state.is_dirty() {
-        left.push_str(" (modified)");
-    }
-
-    // right‑hand part (coordinates)
-    let right = format!("col: {}, row: {}", col_disp, row_disp);
-
-    // combine and pad to the full terminal width
-    let combined = format!("{} {}", left, right);
-    fit_to_width(&combined, cols as usize)
 }
 
 /*==========================================================================*
@@ -231,41 +190,90 @@ fn status_help_line_shows_search_query_when_searching() {
 }
 
 /*==========================================================================*
- * Status line contains coordinates and dirty marker
+ * status_line(): the real, testable string-building logic behind
+ * queue_status_information
  *==========================================================================*/
 #[test]
-fn status_line_shows_coords_and_dirty_marker_correctly() {
-    // Small terminal – 40 columns, 5 rows (status line is at row 3).
-    let cols = 80u16;
-    let rows = 5u16;
-
-    let mut state = EditorState::new((cols, rows));
+fn status_line_includes_filetype_line_count_char_count_and_coordinates() {
+    let mut state = EditorState::new((80, 24));
     state.load_document("first line\nsecond line\n", Some("demo.txt"));
-
-    // Move cursor to column 3 (zero‑based → user sees col 4) on line 1.
     state.set_cursor(3, 1);
 
-    // ---- clean buffer ----------------------------------------------------
-    let clean = build_status_line(&state, cols, rows);
+    let line = state.status_line();
+    // Ropey counts the trailing '\n' as starting a third, empty line.
+    assert!(line.contains("3 lines"));
+    assert!(line.contains("chars"));
     assert!(
-        clean.contains("col: 4, row: 2"),
-        "clean status line must contain the coordinates"
+        line.contains("col: 3, row: 1"),
+        "coordinates are 0-based, matching cursor_pos() directly: {line}"
     );
+}
+
+#[test]
+fn status_line_coordinates_update_after_edit() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("first line\nsecond line\n", Some("demo.txt"));
+    state.set_cursor(3, 1);
+
+    apply_key(&mut state, InputKey::Char('x'), &mut false, &mut false);
+
+    // The insertion moved the cursor one column to the right.
     assert!(
-        !clean.contains("(modified)"),
+        state.status_line().contains("col: 4, row: 1"),
+        "coordinates must update after the edit"
+    );
+}
+
+#[test]
+fn status_line_shows_modified_only_when_dirty() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("first line\n", Some("demo.txt"));
+
+    assert!(
+        !state.status_line().contains("(modified)"),
         "clean buffer must not show the modified flag"
     );
 
-    // ---- make it dirty ---------------------------------------------------
     apply_key(&mut state, InputKey::Char('x'), &mut false, &mut false);
-    let dirty = build_status_line(&state, cols, rows);
+
     assert!(
-        dirty.contains("(modified)"),
+        state.status_line().contains("(modified)"),
         "dirty buffer must show the modified flag"
     );
-    // The insertion moved the cursor one column to the right.
+}
+
+#[test]
+fn status_line_shows_wrap_tag_only_when_visual_line_mode_on() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("first line\n", Some("demo.txt"));
+
     assert!(
-        dirty.contains("col: 5, row: 2"),
-        "coordinates must update after the edit"
+        !state.status_line().contains("(wrap)"),
+        "wrap tag must not show when visual_line_mode is off"
+    );
+
+    state.visual_line_mode = true;
+
+    assert!(
+        state.status_line().contains("(wrap)"),
+        "wrap tag must show when visual_line_mode is on"
+    );
+}
+
+#[test]
+fn status_line_shows_quit_countdown_when_pending() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("first line\n", Some("demo.txt"));
+
+    assert!(
+        !state.status_line().contains("more quit(s)"),
+        "quit countdown must not show when quit_count is 0"
+    );
+
+    state.quit_count = 1;
+
+    assert!(
+        state.status_line().contains("more quit(s)"),
+        "quit countdown must show when quit_count is nonzero"
     );
 }

@@ -77,28 +77,7 @@ impl EditorUi {
         let status_y = rows - 2;
         let help_y = rows - 1;
 
-        let filetype_str = state.file_type.as_str();
-        let cx = state.cursor_pos().0;
-        let cy = state.cursor_pos().1;
-
-        // formulate status message from blocks (left, right)
-        let mut left_part = format!(
-            "{}: {} lines, {} chars",
-            filetype_str,
-            state.index_of_last_line() + 1,
-            state.char_count()
-        );
-        if state.is_dirty() {
-            left_part.push_str(" (modified) ");
-        }
-
-        if state.quit_count > 0 {
-            left_part.push_str(&format!(" ({} more quit(s) to discard)", state.quit_count));
-        }
-
-        let right_part = format!("(col: {}, row: {})", cx, cy);
-        let status_message = format!("{}    {}", left_part, right_part);
-
+        let status_message = state.status_line();
         let help_line = state.status_help_line();
 
         queue!(
