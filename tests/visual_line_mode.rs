@@ -89,3 +89,91 @@ fn wrapped_lines_returns_no_chunks_for_zero_width() {
 
     assert!(chunks.is_empty());
 }
+
+/// `wrapped_screen_rows` composes `wrapped_lines` across the whole buffer
+/// (starting at `row_offset`) into the flat list of screen rows
+/// `draw_screen` will paint. Rows past the end of the buffer come back as
+/// `None`, so the caller can print `~` for them exactly as it does today.
+#[test]
+fn wrapped_screen_rows_pads_with_none_past_buffer_end() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("one\ntwo\nthree", Some("dummy.txt"));
+
+    let rows = state.wrapped_screen_rows(5, 10);
+
+    assert_eq!(
+        rows,
+        vec![
+            Some("one".to_string()),
+            Some("two".to_string()),
+            Some("three".to_string()),
+            None,
+            None,
+        ]
+    );
+}
+
+/// A blank buffer line must still occupy exactly one screen row (an empty
+/// string), not zero — `wrapped_lines` returns an empty `Vec` for a blank
+/// line, which is correct in isolation, but composing screen rows must not
+/// let that collapse the blank line out of existence and shift every line
+/// below it up by one row.
+#[test]
+fn wrapped_screen_rows_gives_blank_line_exactly_one_row() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("one\n\ntwo", Some("dummy.txt"));
+
+    let rows = state.wrapped_screen_rows(3, 10);
+
+    assert_eq!(
+        rows,
+        vec![
+            Some("one".to_string()),
+            Some(String::new()),
+            Some("two".to_string()),
+        ]
+    );
+}
+
+/// A buffer line that wraps into several chunks consumes that many screen
+/// rows, and layout continues correctly with the buffer lines after it.
+#[test]
+fn wrapped_screen_rows_lets_one_buffer_line_span_multiple_rows() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("the quick brown fox\nnext", Some("dummy.txt"));
+
+    let rows = state.wrapped_screen_rows(5, 10);
+
+    assert_eq!(
+        rows,
+        vec![
+            Some("the quick ".to_string()),
+            Some("brown fox".to_string()),
+            Some("next".to_string()),
+            None,
+            None,
+        ]
+    );
+}
+
+/// Known limitation, accepted for this increment: `row_offset` is still a
+/// buffer-line index, not a visual-row index, so there's no way yet to know
+/// in advance that a wrapped line won't fully fit in the remaining rows.
+/// When the screen runs out of rows mid-line, the rest of that line's
+/// chunks are simply dropped rather than being scrolled to. This test pins
+/// down that exact (imperfect) behaviour so a future fix — scrolling by
+/// visual row instead of buffer line — has a clear regression signal.
+#[test]
+fn wrapped_screen_rows_clips_a_line_that_does_not_fully_fit() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("short\nthe quick brown fox", Some("dummy.txt"));
+
+    // Only 2 rows available: "short" takes row 1, leaving just 1 row for
+    // "the quick brown fox", which would normally need 2 rows to wrap into.
+    let rows = state.wrapped_screen_rows(2, 10);
+
+    assert_eq!(
+        rows,
+        vec![Some("short".to_string()), Some("the quick ".to_string())]
+    );
+}

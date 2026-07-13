@@ -371,6 +371,46 @@ impl EditorState {
         chunks
     }
 
+    /// Compose `wrapped_lines` across the whole buffer, starting at
+    /// `row_offset`, into the flat list of screen rows to paint when
+    /// `visual_line_mode` is on.
+    ///
+    /// Returns exactly `height` entries: `Some(chunk)` for a screen row
+    /// with real content, `None` once the buffer runs out (so the caller
+    /// can print `~`, matching the non-wrapped rendering path). A blank
+    /// buffer line still claims exactly one row (an empty chunk), even
+    /// though `wrapped_lines` itself returns nothing for it. A line that
+    /// wraps into more chunks than there is room left for is clipped —
+    /// a known limitation for this increment; scrolling by visual row
+    /// instead of buffer line is expected to fix it later.
+    pub fn wrapped_screen_rows(&self, height: usize, width: usize) -> Vec<Option<String>> {
+        let mut rows = Vec::with_capacity(height);
+        let mut line_index = self.row_offset;
+
+        while rows.len() < height && line_index <= self.index_of_last_line() {
+            let chunks = self.wrapped_lines(line_index, width);
+
+            if chunks.is_empty() {
+                rows.push(Some(String::new()));
+            } else {
+                for chunk in chunks {
+                    if rows.len() == height {
+                        break;
+                    }
+                    rows.push(Some(chunk));
+                }
+            }
+
+            line_index += 1;
+        }
+
+        while rows.len() < height {
+            rows.push(None);
+        }
+
+        rows
+    }
+
     // Saving a file step 1, have it as a string that can be written to a file
     pub fn save_to_string(&self) -> String {
         self.text.to_string()
