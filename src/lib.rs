@@ -827,18 +827,92 @@ impl EditorState {
     }
 
     pub fn cursor_up(&mut self) {
-        if self.cy > 0 {
+        if self.visual_line_mode {
+            self.move_cursor_visual_up();
+        } else if self.cy > 0 {
             self.cy -= 1;
             self.cx = self.cx.min(self.current_line_len());
         }
         self.ensure_cursor_visible();
     }
     pub fn cursor_down(&mut self) {
-        if self.cy < self.index_of_last_line() {
+        if self.visual_line_mode {
+            self.move_cursor_visual_down();
+        } else if self.cy < self.index_of_last_line() {
             self.cy += 1;
             self.cx = self.cx.min(self.current_line_len());
         }
         self.ensure_cursor_visible();
+    }
+
+    /// How many characters come before chunk `idx` in a line's wrapped
+    /// chunks — the buffer-column offset where that chunk begins.
+    fn chars_before_chunk(chunks: &[String], idx: usize) -> usize {
+        chunks[..idx].iter().map(|c| c.chars().count()).sum()
+    }
+
+    /// The inverse of `wrapped_cursor_offset`'s column half: given one
+    /// wrapped chunk and a target display column, which character index
+    /// in that chunk is closest to it? Clamps to the end of the chunk if
+    /// `target_col` is wider than the chunk itself.
+    fn char_offset_for_col(&self, chunk: &str, target_col: usize) -> usize {
+        let mut col = 0;
+        for (i, c) in chunk.chars().enumerate() {
+            if col >= target_col {
+                return i;
+            }
+            col += self.display_width(c);
+        }
+        chunk.chars().count()
+    }
+
+    /// `cursor_down`'s wrapped-mode behaviour: move to the next chunk on
+    /// the same buffer line if there is one, otherwise to the first chunk
+    /// of the next buffer line. Either way, `col_within_row` (the
+    /// cursor's current wrapped column) is used as a one-shot target
+    /// column in the destination chunk — not remembered across repeated
+    /// moves, matching plain (non-wrapped) `cursor_down`.
+    fn move_cursor_visual_down(&mut self) {
+        let width = self.text_area_width();
+        let chunks = self.wrapped_lines(self.cy, width);
+        let (row_within_line, col_within_row) = self.wrapped_cursor_offset(self.cy, self.cx, width);
+
+        if row_within_line + 1 < chunks.len() {
+            let target_row = row_within_line + 1;
+            let chars_before = Self::chars_before_chunk(&chunks, target_row);
+            self.cx = chars_before + self.char_offset_for_col(&chunks[target_row], col_within_row);
+        } else if self.cy < self.index_of_last_line() {
+            self.cy += 1;
+            let next_chunks = self.wrapped_lines(self.cy, width);
+            self.cx = next_chunks
+                .first()
+                .map_or(0, |chunk| self.char_offset_for_col(chunk, col_within_row));
+        }
+    }
+
+    /// `cursor_up`'s wrapped-mode behaviour — the mirror image of
+    /// `move_cursor_visual_down`: previous chunk on the same buffer line,
+    /// or the *last* chunk of the *previous* buffer line.
+    fn move_cursor_visual_up(&mut self) {
+        let width = self.text_area_width();
+        let chunks = self.wrapped_lines(self.cy, width);
+        let (row_within_line, col_within_row) = self.wrapped_cursor_offset(self.cy, self.cx, width);
+
+        if row_within_line > 0 {
+            let target_row = row_within_line - 1;
+            let chars_before = Self::chars_before_chunk(&chunks, target_row);
+            self.cx = chars_before + self.char_offset_for_col(&chunks[target_row], col_within_row);
+        } else if self.cy > 0 {
+            self.cy -= 1;
+            let prev_chunks = self.wrapped_lines(self.cy, width);
+            self.cx = match prev_chunks.len().checked_sub(1) {
+                Some(last_row) => {
+                    let chars_before = Self::chars_before_chunk(&prev_chunks, last_row);
+                    chars_before + self.char_offset_for_col(&prev_chunks[last_row], col_within_row)
+                }
+                None => 0,
+            };
+        }
     }
     pub fn current_line(&self) -> RopeSlice<'_> {
         self.text.line(self.cy)

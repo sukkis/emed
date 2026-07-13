@@ -301,3 +301,82 @@ fn wrapped_cursor_offset_on_blank_line() {
 
     assert_eq!(state.wrapped_cursor_offset(1, 0, 10), (0, 0));
 }
+
+/// With `visual_line_mode` on, `cursor_down`/`cursor_up` move by wrapped
+/// visual row instead of whole buffer line, using `wrapped_cursor_offset`
+/// and `wrapped_lines` (already tested on their own) to find the target
+/// position. Column is a one-shot target, not remembered across repeated
+/// moves — matching the existing plain `cursor_up`/`cursor_down`, which
+/// don't track a "goal column" either.
+
+/// Moving down while inside an earlier wrapped chunk of a line lands in
+/// the next chunk of the *same* buffer line, at the same column.
+#[test]
+fn cursor_down_moves_within_wrapped_line_before_advancing_to_next_buffer_line() {
+    let mut state = EditorState::new((10, 24));
+    state.load_document("the quick brown fox", Some("dummy.txt"));
+    state.visual_line_mode = true;
+    state.set_cursor(2, 0); // 2 chars into "the quick ", the first chunk
+
+    state.cursor_down();
+
+    // 2 chars into "brown fox", the second chunk — same column, same line.
+    assert_eq!(state.cursor_pos(), (12, 0));
+}
+
+/// Moving down from the *last* wrapped chunk of a line advances to the
+/// next buffer line's first chunk, preserving the column.
+#[test]
+fn cursor_down_from_last_wrapped_chunk_moves_to_next_buffer_line_preserving_column() {
+    let mut state = EditorState::new((10, 24));
+    state.load_document("the quick brown fox\nsecond line", Some("dummy.txt"));
+    state.visual_line_mode = true;
+    state.set_cursor(12, 0); // 2 chars into "brown fox", the last chunk of line 0
+
+    state.cursor_down();
+
+    assert_eq!(state.cursor_pos(), (2, 1));
+}
+
+/// Moving up from the *first* wrapped chunk of a line goes to the *last*
+/// chunk of the previous buffer line, preserving the column.
+#[test]
+fn cursor_up_from_first_wrapped_chunk_moves_to_last_chunk_of_previous_buffer_line() {
+    let mut state = EditorState::new((10, 24));
+    state.load_document("second line\nthe quick brown fox", Some("dummy.txt"));
+    state.visual_line_mode = true;
+    state.set_cursor(2, 1); // 2 chars into "the quick ", the first chunk of line 1
+
+    state.cursor_up();
+
+    // 2 chars into "line", the last chunk of "second line".
+    assert_eq!(state.cursor_pos(), (9, 0));
+}
+
+/// At the very last visual row of the whole buffer, moving down is a
+/// no-op — same boundary behaviour as plain (non-wrapped) `cursor_down`.
+#[test]
+fn cursor_down_at_last_visual_row_of_buffer_is_noop() {
+    let mut state = EditorState::new((10, 24));
+    state.load_document("short", Some("dummy.txt"));
+    state.visual_line_mode = true;
+    state.set_cursor(2, 0);
+
+    state.cursor_down();
+
+    assert_eq!(state.cursor_pos(), (2, 0));
+}
+
+/// At the very first visual row of the whole buffer, moving up is a
+/// no-op — same boundary behaviour as plain (non-wrapped) `cursor_up`.
+#[test]
+fn cursor_up_at_first_visual_row_of_buffer_is_noop() {
+    let mut state = EditorState::new((10, 24));
+    state.load_document("short", Some("dummy.txt"));
+    state.visual_line_mode = true;
+    state.set_cursor(2, 0);
+
+    state.cursor_up();
+
+    assert_eq!(state.cursor_pos(), (2, 0));
+}
