@@ -65,6 +65,9 @@ Extras
 - [x] Soft line wrapping (`visual_line_mode`, word-wrap, toggled with `C-c l`)
 - [ ] Syntax highlighting in wrapped mode (currently plain foreground colour only)
 - [ ] Indent-aware wrap prefix for soft-wrapped lines
+- [ ] Cycle to next theme with a keybinding (e.g. `C-c t`, Emacs-style) — needs a design
+      decision first: theme currently lives on `EditorUi`, not `EditorState`, so a
+      command-driven toggle needs somewhere testable to track "current theme"
 
 ## License
 
