@@ -15,6 +15,7 @@
 //! visual-row cursor movement) will need to build on.
 
 use emed_core::EditorState;
+use emed_core::wrap::WrappedRow;
 
 /// A line that already fits within the given width should come back as a
 /// single, untouched chunk.
@@ -104,9 +105,21 @@ fn wrapped_screen_rows_pads_with_none_past_buffer_end() {
     assert_eq!(
         rows,
         vec![
-            Some("one".to_string()),
-            Some("two".to_string()),
-            Some("three".to_string()),
+            Some(WrappedRow {
+                line_index: 0,
+                start_col: 0,
+                text: "one".to_string()
+            }),
+            Some(WrappedRow {
+                line_index: 1,
+                start_col: 0,
+                text: "two".to_string()
+            }),
+            Some(WrappedRow {
+                line_index: 2,
+                start_col: 0,
+                text: "three".to_string()
+            }),
             None,
             None,
         ]
@@ -128,9 +141,21 @@ fn wrapped_screen_rows_gives_blank_line_exactly_one_row() {
     assert_eq!(
         rows,
         vec![
-            Some("one".to_string()),
-            Some(String::new()),
-            Some("two".to_string()),
+            Some(WrappedRow {
+                line_index: 0,
+                start_col: 0,
+                text: "one".to_string()
+            }),
+            Some(WrappedRow {
+                line_index: 1,
+                start_col: 0,
+                text: String::new()
+            }),
+            Some(WrappedRow {
+                line_index: 2,
+                start_col: 0,
+                text: "two".to_string()
+            }),
         ]
     );
 }
@@ -147,9 +172,21 @@ fn wrapped_screen_rows_lets_one_buffer_line_span_multiple_rows() {
     assert_eq!(
         rows,
         vec![
-            Some("the quick ".to_string()),
-            Some("brown fox".to_string()),
-            Some("next".to_string()),
+            Some(WrappedRow {
+                line_index: 0,
+                start_col: 0,
+                text: "the quick ".to_string()
+            }),
+            Some(WrappedRow {
+                line_index: 0,
+                start_col: 10,
+                text: "brown fox".to_string()
+            }),
+            Some(WrappedRow {
+                line_index: 1,
+                start_col: 0,
+                text: "next".to_string()
+            }),
             None,
             None,
         ]
@@ -174,7 +211,18 @@ fn wrapped_screen_rows_clips_a_line_that_does_not_fully_fit() {
 
     assert_eq!(
         rows,
-        vec![Some("short".to_string()), Some("the quick ".to_string())]
+        vec![
+            Some(WrappedRow {
+                line_index: 0,
+                start_col: 0,
+                text: "short".to_string()
+            }),
+            Some(WrappedRow {
+                line_index: 1,
+                start_col: 0,
+                text: "the quick ".to_string()
+            }),
+        ]
     );
 }
 

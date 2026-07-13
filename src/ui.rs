@@ -139,9 +139,11 @@ impl EditorUi {
         // its own `else` arm so you don't need to re-check it line by line).
         if state.visual_line_mode {
             // Wrapped rendering: `wrapped_screen_rows` already decided what
-            // each screen row shows, so all this loop does is paint it.
-            // No syntax-highlight token coloring yet — deferred on purpose,
-            // see the earlier discussion about scoping this increment down.
+            // each screen row shows. Each row carries its source
+            // `line_index`/`start_col`, so token coloring works exactly
+            // like the non-wrapped path below — just with the buffer
+            // column reconstructed from `start_col + char_idx` instead of
+            // `col_offset + char_idx`.
             let screen_rows = state.wrapped_screen_rows(text_rows, width);
 
             for (screen_y, row) in screen_rows.iter().enumerate() {
@@ -154,11 +156,48 @@ impl EditorUi {
 
                 match row {
                     // A real row of (wrapped) buffer content.
-                    Some(chunk) => {
+                    Some(row) => {
+                        let tokens = state.tokens_for_line(row.line_index).to_vec();
+                        if tokens.is_empty() {
+                            queue!(
+                                self.stdout,
+                                SetForegroundColor(self.theme.fg.to_crossterm()),
+                                Print(&row.text),
+                            )?;
+                        } else {
+                            for (char_idx, ch) in row.text.chars().enumerate() {
+                                let buf_col = row.start_col + char_idx;
+
+                                let kind = tokens
+                                    .iter()
+                                    .find(|t| buf_col >= t.start && buf_col < t.start + t.len)
+                                    .map(|t| t.kind)
+                                    .unwrap_or(TokenKind::Normal);
+
+                                match kind {
+                                    TokenKind::Number => {
+                                        queue!(
+                                            self.stdout,
+                                            SetForegroundColor(self.theme.number_fg.to_crossterm()),
+                                            Print(ch),
+                                        )?;
+                                    }
+                                    _ => {
+                                        queue!(
+                                            self.stdout,
+                                            SetForegroundColor(self.theme.fg.to_crossterm()),
+                                            Print(ch),
+                                        )?;
+                                    }
+                                }
+                            }
+                            queue!(
+                                self.stdout,
+                                SetForegroundColor(self.theme.fg.to_crossterm()),
+                            )?;
+                        }
                         queue!(
                             self.stdout,
-                            SetForegroundColor(self.theme.fg.to_crossterm()),
-                            Print(chunk),
                             terminal::Clear(terminal::ClearType::UntilNewLine)
                         )?;
                     }

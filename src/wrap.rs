@@ -5,6 +5,17 @@
 
 use crate::EditorState;
 
+/// One screen row's worth of wrapped content: which buffer line it came
+/// from, the char offset within that line where this chunk starts (needed
+/// to look up syntax-highlight tokens, which are indexed by buffer column,
+/// not screen column), and the chunk text itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WrappedRow {
+    pub line_index: usize,
+    pub start_col: usize,
+    pub text: String,
+}
+
 impl EditorState {
     /// Word-wrap a single buffer line into chunks that each fit within
     /// `width` display columns, for `visual_line_mode` rendering.
@@ -89,15 +100,19 @@ impl EditorState {
     /// `row_offset`, into the flat list of screen rows to paint when
     /// `visual_line_mode` is on.
     ///
-    /// Returns exactly `height` entries: `Some(chunk)` for a screen row
+    /// Returns exactly `height` entries: `Some(WrappedRow)` for a screen row
     /// with real content, `None` once the buffer runs out (so the caller
-    /// can print `~`, matching the non-wrapped rendering path). A blank
-    /// buffer line still claims exactly one row (an empty chunk), even
-    /// though `wrapped_lines` itself returns nothing for it. A line that
-    /// wraps into more chunks than there is room left for is clipped —
-    /// a known limitation for this increment; scrolling by visual row
-    /// instead of buffer line is expected to fix it later.
-    pub fn wrapped_screen_rows(&self, height: usize, width: usize) -> Vec<Option<String>> {
+    /// can print `~`, matching the non-wrapped rendering path). Each
+    /// `WrappedRow` carries its source `line_index` and `start_col` (the
+    /// char offset within that line) alongside the chunk text, so a caller
+    /// doing syntax-highlight token lookup — which is indexed by buffer
+    /// column — can reconstruct the buffer column of each character in the
+    /// chunk. A blank buffer line still claims exactly one row (an empty
+    /// chunk), even though `wrapped_lines` itself returns nothing for it.
+    /// A line that wraps into more chunks than there is room left for is
+    /// clipped — a known limitation for this increment; scrolling by
+    /// visual row instead of buffer line is expected to fix it later.
+    pub fn wrapped_screen_rows(&self, height: usize, width: usize) -> Vec<Option<WrappedRow>> {
         let mut rows = Vec::with_capacity(height);
         let mut line_index = self.row_offset;
 
@@ -105,13 +120,24 @@ impl EditorState {
             let chunks = self.wrapped_lines(line_index, width);
 
             if chunks.is_empty() {
-                rows.push(Some(String::new()));
+                rows.push(Some(WrappedRow {
+                    line_index,
+                    start_col: 0,
+                    text: String::new(),
+                }));
             } else {
+                let mut start_col = 0;
                 for chunk in chunks {
                     if rows.len() == height {
                         break;
                     }
-                    rows.push(Some(chunk));
+                    let chunk_char_count = chunk.chars().count();
+                    rows.push(Some(WrappedRow {
+                        line_index,
+                        start_col,
+                        text: chunk,
+                    }));
+                    start_col += chunk_char_count;
                 }
             }
 
