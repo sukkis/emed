@@ -239,3 +239,65 @@ fn screen_rows_before_line_respects_row_offset() {
     // line 4 now — not lines 0..4, since 0 and 1 have scrolled off.
     assert_eq!(state.screen_rows_before_line(4, 10), 2);
 }
+
+/// `wrapped_cursor_offset` is the within-the-current-line half of mapping
+/// a buffer position to a screen position: given `cx` on `line_index`,
+/// which wrapped chunk does it fall in, and what column within that
+/// chunk? Combined with `screen_rows_before_line`, this is everything
+/// `draw_screen` needs to place the cursor correctly under wrapping.
+
+/// A cursor on a line short enough not to wrap is always in chunk 0, at
+/// its own character offset.
+#[test]
+fn wrapped_cursor_offset_within_a_single_chunk() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("short\n", Some("dummy.txt"));
+
+    // cx = 2 is the cursor sitting between 'h' and 'o'.
+    assert_eq!(state.wrapped_cursor_offset(0, 2, 10), (0, 2));
+}
+
+/// A cursor inside a later wrapped chunk reports that chunk's index and
+/// an offset relative to *that chunk's* start, not the whole line.
+#[test]
+fn wrapped_cursor_offset_within_a_later_chunk() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("the quick brown fox\n", Some("dummy.txt"));
+
+    // cx = 12 is between 'r' and 'o' in "brown", which is 2 characters
+    // into the second chunk ("brown fox").
+    assert_eq!(state.wrapped_cursor_offset(0, 12, 10), (1, 2));
+}
+
+/// A cursor at the very end of the line sits at the end of the last
+/// chunk, not off the end of a nonexistent next chunk.
+#[test]
+fn wrapped_cursor_offset_at_end_of_line() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("short\n", Some("dummy.txt"));
+
+    assert_eq!(state.wrapped_cursor_offset(0, 5, 10), (0, 5));
+}
+
+/// A cursor sitting exactly at a *mid-line* chunk boundary belongs to the
+/// start of the next row, not the end of the previous one — the same
+/// "every visual line starts at a real character" rule from
+/// `wrapped_lines` applies to the cursor too.
+#[test]
+fn wrapped_cursor_offset_at_chunk_boundary_lands_at_start_of_next_row() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("the quick brown fox\n", Some("dummy.txt"));
+
+    // cx = 10 is exactly the boundary between "the quick " and "brown fox".
+    assert_eq!(state.wrapped_cursor_offset(0, 10, 10), (1, 0));
+}
+
+/// A blank line has no chunks to look through — the cursor is simply at
+/// its one (empty) row, column 0.
+#[test]
+fn wrapped_cursor_offset_on_blank_line() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("one\n\ntwo", Some("dummy.txt"));
+
+    assert_eq!(state.wrapped_cursor_offset(1, 0, 10), (0, 0));
+}

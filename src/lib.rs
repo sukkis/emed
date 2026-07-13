@@ -422,6 +422,50 @@ impl EditorState {
             .sum()
     }
 
+    /// The within-the-current-line half of mapping a buffer position to a
+    /// screen position: given `cx` on `line_index`, which wrapped chunk
+    /// (row within the line) does it fall in, and what display column
+    /// within that chunk? A `cx` sitting exactly on a mid-line chunk
+    /// boundary belongs to the start of the *next* chunk, not the end of
+    /// the previous one, matching `wrapped_lines`' "every chunk starts at
+    /// a real character" rule.
+    pub fn wrapped_cursor_offset(
+        &self,
+        line_index: usize,
+        cx: usize,
+        width: usize,
+    ) -> (usize, usize) {
+        let chunks = self.wrapped_lines(line_index, width);
+
+        if chunks.is_empty() {
+            return (0, 0);
+        }
+
+        let mut chars_before = 0;
+        for (chunk_idx, chunk) in chunks.iter().enumerate() {
+            let chunk_char_count = chunk.chars().count();
+            let is_last = chunk_idx == chunks.len() - 1;
+
+            // Keep looking for a later chunk unless `cx` genuinely falls
+            // within this one, or there's nowhere else left to put it
+            // (the last chunk also has to catch `cx` sitting right at the
+            // end of the line).
+            if cx < chars_before + chunk_char_count || is_last {
+                let offset_chars = cx - chars_before;
+                let col = chunk
+                    .chars()
+                    .take(offset_chars)
+                    .map(|c| self.display_width(c))
+                    .sum();
+                return (chunk_idx, col);
+            }
+
+            chars_before += chunk_char_count;
+        }
+
+        unreachable!("the last chunk always satisfies the condition above")
+    }
+
     // Saving a file step 1, have it as a string that can be written to a file
     pub fn save_to_string(&self) -> String {
         self.text.to_string()
