@@ -12,6 +12,7 @@ Early prototype — expect rough edges and frequent changes.
 - `Ctrl+x` then `Ctrl+s` — save file (prompts for filename if unknown)
 - `Ctrl+g` — cancel prompt, or cancel an in-progress search (restores cursor)
 - `Ctrl+s` — start incremental search; while searching, type to refine, `Ctrl+s` again to jump to the next match (wrapping), `Enter` to accept
+- `Ctrl+c` then `l` — toggle soft line wrap (`visual_line_mode`); wrapped lines break at word boundaries and cursor movement follows the wrapped rows
 - Typing, Enter, Backspace, Delete — edit text as expected
 
 ## Dependencies
@@ -61,6 +62,9 @@ Extras
 - [x] Colour themes support
 - [x] Configurable tab width
 - [x] Panic-safe terminal cleanup
+- [x] Soft line wrapping (`visual_line_mode`, word-wrap, toggled with `C-c l`)
+- [ ] Syntax highlighting in wrapped mode (currently plain foreground colour only)
+- [ ] Indent-aware wrap prefix for soft-wrapped lines
 
 ## License
 
