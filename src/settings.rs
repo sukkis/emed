@@ -8,6 +8,8 @@ pub fn load_settings(toml_content: &str) -> HashMap<String, String> {
         .unwrap()
         .set_default("tab_width", "4")
         .unwrap()
+        .set_default("visual_line_mode", "false")
+        .unwrap()
         .add_source(config::File::from_str(
             toml_content,
             config::FileFormat::Toml,
@@ -23,9 +25,11 @@ pub fn load_settings(toml_content: &str) -> HashMap<String, String> {
 #[cfg(test)]
 #[test]
 fn settings_file_returns_expected_values() {
-    let settings = load_settings("theme = \"ocean\"\ntab_width = \"8\"\n");
+    let settings =
+        load_settings("theme = \"ocean\"\ntab_width = \"8\"\nvisual_line_mode = \"true\"\n");
     assert_eq!(settings.get("theme").unwrap(), "ocean");
     assert_eq!(settings.get("tab_width").unwrap(), "8");
+    assert_eq!(settings.get("visual_line_mode").unwrap(), "true");
 }
 
 #[test]
@@ -33,6 +37,7 @@ fn missing_settings_fall_back_to_defaults() {
     let settings = load_settings("");
     assert_eq!(settings.get("theme").unwrap(), "pink");
     assert_eq!(settings.get("tab_width").unwrap(), "4");
+    assert_eq!(settings.get("visual_line_mode").unwrap(), "false");
 }
 
 #[test]

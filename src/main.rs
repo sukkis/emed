@@ -267,6 +267,7 @@ fn main() -> io::Result<()> {
     let settings = settings::load_settings(&toml_content);
     let user_defined_theme = settings.get("theme").unwrap();
     let user_defined_tab_width = settings.get("tab_width").unwrap();
+    let user_defined_visual_line_mode = settings.get("visual_line_mode").unwrap();
     let mut ui = EditorUi::new(stdout, Theme::from_name(user_defined_theme));
 
     terminal::enable_raw_mode()?;
@@ -274,7 +275,12 @@ fn main() -> io::Result<()> {
     // Run the editor in a closure so we can always clean up,
     // even if something panics or returns an error.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        run_editor(&args, &mut ui, user_defined_tab_width)
+        run_editor(
+            &args,
+            &mut ui,
+            user_defined_tab_width,
+            user_defined_visual_line_mode,
+        )
     }));
 
     // Always clean up the terminal, no matter what happened.
@@ -289,7 +295,12 @@ fn main() -> io::Result<()> {
     }
 }
 
-fn run_editor(args: &Args, ui: &mut EditorUi, user_defined_tab_width: &str) -> io::Result<()> {
+fn run_editor(
+    args: &Args,
+    ui: &mut EditorUi,
+    user_defined_tab_width: &str,
+    user_defined_visual_line_mode: &str,
+) -> io::Result<()> {
     let screen_size = terminal::size()?;
 
     ui.print_editor_version(screen_size.0, screen_size.1)?;
@@ -297,6 +308,7 @@ fn run_editor(args: &Args, ui: &mut EditorUi, user_defined_tab_width: &str) -> i
 
     let mut state = EditorState::new(screen_size);
     state.tab_width = user_defined_tab_width.parse::<usize>().unwrap();
+    state.visual_line_mode = user_defined_visual_line_mode.parse::<bool>().unwrap();
 
     // If we have an argument, load the file.
     if let Some(path) = args.file.as_deref() {

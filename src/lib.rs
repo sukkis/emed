@@ -41,6 +41,11 @@ pub struct EditorState {
     /// When this reaches QUIT_CONFIRM_COUNT the editor actually exits.
     pub quit_count: u8,
     pub tab_width: usize,
+    /// Whether long lines wrap at word boundaries instead of scrolling
+    /// horizontally. Mirrors Emacs' `visual-line-mode`. Rendering support
+    /// for this is not wired up yet — for now it's just a flag with a
+    /// default and a settings-file override.
+    pub visual_line_mode: bool,
     /// Syntax lexer chosen based on `file_type`.  `None` = no highlighting.
     lexer: Option<Box<dyn Lexer>>,
     /// Per-line token cache.  `token_cache[i]` holds the tokens for line `i`.
@@ -149,6 +154,7 @@ impl EditorState {
             dirty: false,
             quit_count: 0,
             tab_width: 4,
+            visual_line_mode: false,
             lexer: Some(lexer_for_file_type(&FileType::Unknown)),
             token_cache: vec![Vec::new(); 1], // Rope::new() has 1 line
             search: None,
@@ -862,6 +868,13 @@ pub fn command_from_key(key: InputKey, saw_ctrl_x: &mut bool) -> EditorCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn new_editor_state_defaults_to_visual_line_mode_off() {
+        let state = EditorState::new((80, 24));
+
+        assert!(!state.visual_line_mode);
+    }
+
     #[test]
     fn last_line_index_is_lines_minus_one_with_four_lines() {
         // initialize state with one line
