@@ -177,3 +177,65 @@ fn wrapped_screen_rows_clips_a_line_that_does_not_fully_fit() {
         vec![Some("short".to_string()), Some("the quick ".to_string())]
     );
 }
+
+/// `screen_rows_before_line` is the row/Y half of mapping a buffer
+/// position to a screen position: how many wrapped screen rows do the
+/// buffer lines from `row_offset` up to (not including) `line_index`
+/// occupy? This is the piece both the cursor-placement fix and (later)
+/// visual-row Up/Down movement need.
+
+/// With no wrapping happening, each buffer line is exactly one screen
+/// row, so this behaves like plain line counting.
+#[test]
+fn screen_rows_before_line_counts_unwrapped_lines_as_one_row_each() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("one\ntwo\nthree", Some("dummy.txt"));
+
+    // Lines 0 and 1 ("one", "two") come before line 2 — 2 rows.
+    assert_eq!(state.screen_rows_before_line(2, 10), 2);
+}
+
+/// A line that wraps into multiple chunks contributes that many rows,
+/// not just one.
+#[test]
+fn screen_rows_before_line_counts_wrapped_lines_as_multiple_rows() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("the quick brown fox\nnext", Some("dummy.txt"));
+
+    // Line 0 wraps into 2 chunks ("the quick ", "brown fox") before
+    // line 1 ("next") begins.
+    assert_eq!(state.screen_rows_before_line(1, 10), 2);
+}
+
+/// A blank line still counts as exactly one row, matching the same rule
+/// `wrapped_screen_rows` uses.
+#[test]
+fn screen_rows_before_line_counts_blank_line_as_one_row() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("one\n\ntwo", Some("dummy.txt"));
+
+    // Line 0 ("one") + line 1 (blank) = 2 rows before line 2 ("two").
+    assert_eq!(state.screen_rows_before_line(2, 10), 2);
+}
+
+/// Counting starts at `row_offset`, not always from buffer line 0 — once
+/// the viewport has scrolled, only the lines actually still on screen
+/// above `line_index` should count.
+#[test]
+fn screen_rows_before_line_respects_row_offset() {
+    // 5 rows tall screen → text area height = 5 - 2 = 3.
+    let mut state = EditorState::new((10, 5));
+    state.load_document("one\ntwo\nthree\nfour\nfive\nsix", Some("dummy.txt"));
+
+    // Move down to buffer line 4 ("five"). With a 3-row text area this
+    // scrolls row_offset to 2 (see the identical math in the existing
+    // cursor_up_and_down_clamp_cx_to_line_length test in lib.rs).
+    for _ in 0..4 {
+        state.cursor_down();
+    }
+    assert_eq!(state.row_offset(), 2);
+
+    // Only lines 2 and 3 ("three", "four") are between row_offset and
+    // line 4 now — not lines 0..4, since 0 and 1 have scrolled off.
+    assert_eq!(state.screen_rows_before_line(4, 10), 2);
+}

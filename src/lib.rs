@@ -411,6 +411,17 @@ impl EditorState {
         rows
     }
 
+    /// How many wrapped screen rows the buffer lines from `row_offset` up
+    /// to (but not including) `line_index` occupy. The row/Y half of
+    /// mapping a buffer position to a screen position — reuses the same
+    /// "a blank line still counts as one row" rule as
+    /// `wrapped_screen_rows`, via `.max(1)` on each line's chunk count.
+    pub fn screen_rows_before_line(&self, line_index: usize, width: usize) -> usize {
+        (self.row_offset..line_index)
+            .map(|i| self.wrapped_lines(i, width).len().max(1))
+            .sum()
+    }
+
     // Saving a file step 1, have it as a string that can be written to a file
     pub fn save_to_string(&self) -> String {
         self.text.to_string()
