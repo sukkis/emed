@@ -6,6 +6,13 @@
 //! never byte offsets, so callers in the editor (which think in char positions)
 //! can use the results directly.
 
+/// Which way a search scans the haystack.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Forward,
+    Backward,
+}
+
 /// Find the next occurrence of `needle` in `haystack`, starting the search at
 /// char index `start`.
 ///
@@ -21,7 +28,13 @@
 ///   search continues from the beginning of the buffer (so the whole text is
 ///   covered exactly once).  If `wrap` is `false`, only `haystack[start..]`
 ///   is searched.
-pub fn find_from(haystack: &str, needle: &str, start: usize, wrap: bool) -> Option<usize> {
+pub fn find_from(
+    haystack: &str,
+    needle: &str,
+    start: usize,
+    wrap: bool,
+    direction: Direction,
+) -> Option<usize> {
     // Emacs behaviour: an empty query never matches / never moves point.
     if needle.is_empty() {
         return None;
@@ -36,20 +49,40 @@ pub fn find_from(haystack: &str, needle: &str, start: usize, wrap: bool) -> Opti
     // and slicing both work in bytes.
     let byte_start = char_index_to_byte(haystack, start);
 
-    // 1) Search forward in the tail `haystack[byte_start..]`.
-    if let Some(rel_byte) = haystack[byte_start..].find(needle) {
-        let abs_byte = byte_start + rel_byte;
-        return Some(byte_to_char_index(haystack, abs_byte));
-    }
+    match direction {
+        Direction::Forward => {
+            // 1) Search forward in the tail `haystack[byte_start..]`.
+            if let Some(rel_byte) = haystack[byte_start..].find(needle) {
+                let abs_byte = byte_start + rel_byte;
+                return Some(byte_to_char_index(haystack, abs_byte));
+            }
 
-    // 2) Nothing after `start`. If wrapping is allowed, search from the top.
-    //    (We search the whole string; the first hit is necessarily before
-    //    `start`, otherwise step 1 would have found it.)
-    if wrap && let Some(abs_byte) = haystack.find(needle) {
-        return Some(byte_to_char_index(haystack, abs_byte));
-    }
+            // 2) Nothing after `start`. If wrapping is allowed, search from the top.
+            //    (We search the whole string; the first hit is necessarily before
+            //    `start`, otherwise step 1 would have found it.)
+            if wrap && let Some(abs_byte) = haystack.find(needle) {
+                return Some(byte_to_char_index(haystack, abs_byte));
+            }
 
-    None
+            None
+        }
+        Direction::Backward => {
+            // 1) Search backward in the head `haystack[..byte_start]` — the
+            //    last match whose end is at or before `start`.
+            if let Some(abs_byte) = haystack[..byte_start].rfind(needle) {
+                return Some(byte_to_char_index(haystack, abs_byte));
+            }
+
+            // 2) Nothing before `start`. If wrapping is allowed, search the
+            //    whole string for its last match — that hit is necessarily
+            //    at or after `start`, otherwise step 1 would have found it.
+            if wrap && let Some(abs_byte) = haystack.rfind(needle) {
+                return Some(byte_to_char_index(haystack, abs_byte));
+            }
+
+            None
+        }
+    }
 }
 
 /// Convert a char index into the corresponding byte offset within `s`.
@@ -102,7 +135,13 @@ impl SearchSession {
     /// `origin` only — no wraparound. Wrapping is reserved for the explicit
     /// "search again" action (Commit 4's `search_repeat`), not for typing.
     pub fn current_match(&self, haystack: &str) -> Option<usize> {
-        find_from(haystack, &self.query, self.origin, false)
+        find_from(
+            haystack,
+            &self.query,
+            self.origin,
+            false,
+            Direction::Forward,
+        )
     }
 
     /// Where the *next* occurrence of the query is, for the explicit
@@ -112,7 +151,7 @@ impl SearchSession {
     /// re-reports the match already sitting under the cursor. Wraps
     /// around the buffer if nothing is found before the end.
     pub fn repeat_match(&self, haystack: &str, after: usize) -> Option<usize> {
-        find_from(haystack, &self.query, after + 1, true)
+        find_from(haystack, &self.query, after + 1, true, Direction::Forward)
     }
 
     /// The char index the search began at — used to restore the cursor if
@@ -128,39 +167,114 @@ mod tests {
     #[test]
     fn finds_match_after_start() {
         // The core job: locate the needle at or after `start`.
-        assert_eq!(find_from("hello world", "world", 0, false), Some(6));
+        assert_eq!(
+            find_from("hello world", "world", 0, false, Direction::Forward),
+            Some(6)
+        );
     }
 
     #[test]
     fn start_skips_an_earlier_match() {
         // "abcabc": starting past the first "abc" finds the second at 3.
-        assert_eq!(find_from("abcabc", "abc", 1, false), Some(3));
+        assert_eq!(
+            find_from("abcabc", "abc", 1, false, Direction::Forward),
+            Some(3)
+        );
     }
 
     #[test]
     fn no_match_returns_none() {
-        assert_eq!(find_from("hello", "xyz", 0, false), None);
+        assert_eq!(
+            find_from("hello", "xyz", 0, false, Direction::Forward),
+            None
+        );
     }
 
     #[test]
     fn wrap_finds_earlier_match_when_none_after_start() {
         // Nothing in [5..], but wrap lets us find the "abc" at 0.
-        assert_eq!(find_from("abc abc", "abc", 5, true), Some(0));
+        assert_eq!(
+            find_from("abc abc", "abc", 5, true, Direction::Forward),
+            Some(0)
+        );
         // Same input, wrap off → must NOT find it.
-        assert_eq!(find_from("abc abc", "abc", 5, false), None);
+        assert_eq!(
+            find_from("abc abc", "abc", 5, false, Direction::Forward),
+            None
+        );
     }
 
     #[test]
     fn empty_needle_never_matches() {
         // Emacs behaviour: an empty query does not jump.
-        assert_eq!(find_from("hello", "", 0, true), None);
+        assert_eq!(find_from("hello", "", 0, true, Direction::Forward), None);
     }
 
     #[test]
     fn returns_char_index_not_byte_index() {
         // "áé" is 2 chars but 4 bytes. 'x' is char index 2 (byte index 4).
         // This guards the one subtle part of the implementation.
-        assert_eq!(find_from("áéx", "x", 0, false), Some(2));
+        assert_eq!(find_from("áéx", "x", 0, false, Direction::Forward), Some(2));
+    }
+
+    // --- Backward direction: mirrors every test above, one-for-one ---
+
+    #[test]
+    fn finds_match_before_start() {
+        // Backward analog of finds_match_after_start: searching backward
+        // from the end of "hello world" for "hello" finds it at 0.
+        assert_eq!(
+            find_from("hello world", "hello", 11, false, Direction::Backward),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn start_skips_a_later_match() {
+        // "abcabc": the second "abc" starts at 3 but ends at 6, which is
+        // past start=4, so a backward search from 4 must not count it —
+        // only the first "abc" (ending at 3, <= start) qualifies.
+        assert_eq!(
+            find_from("abcabc", "abc", 4, false, Direction::Backward),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn no_match_returns_none_backward() {
+        assert_eq!(
+            find_from("hello", "xyz", 5, false, Direction::Backward),
+            None
+        );
+    }
+
+    #[test]
+    fn wrap_finds_later_match_when_none_before_start() {
+        // Nothing in [..2], but wrap lets us find the "abc" at 4.
+        assert_eq!(
+            find_from("abc abc", "abc", 2, true, Direction::Backward),
+            Some(4)
+        );
+        // Same input, wrap off → must NOT find it.
+        assert_eq!(
+            find_from("abc abc", "abc", 2, false, Direction::Backward),
+            None
+        );
+    }
+
+    #[test]
+    fn empty_needle_never_matches_backward() {
+        assert_eq!(find_from("hello", "", 5, true, Direction::Backward), None);
+    }
+
+    #[test]
+    fn returns_char_index_not_byte_index_backward() {
+        // "áéx": 'é' is char index 1 but byte offset 2. Searching backward
+        // from the end must report the char index, not the byte offset.
+        assert_eq!(
+            find_from("áéx", "é", 3, false, Direction::Backward),
+            Some(1)
+        );
     }
 
     // --- SearchSession: query bookkeeping, no EditorState involved ---
