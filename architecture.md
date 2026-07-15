@@ -172,6 +172,19 @@ no special-casing (they still start with `//`; the extra character is just more 
 Block comments (`/* */`, including Rust's nesting and the multi-line carry-state that requires)
 are a separate, later increment (see `docs/rust-highlighting.md`).
 
+### Keywords (Rust only)
+
+`find_keyword_end` scans the *whole* identifier-shaped word at a position (letters, digits,
+underscores, left-boundary-checked the same way `is_number_start` checks digits) before
+checking it against the alphabetically-sorted `KEYWORDS` list — checking the full word first,
+rather than matching a prefix, is what keeps "structure" from being misread as containing
+"struct". A non-keyword word isn't treated as a token start at all, so it's absorbed into the
+surrounding `Normal` run exactly as before this increment — no fragmentation cost for ordinary
+identifiers. `KEYWORDS` deliberately excludes primitive/std type names (the separate Types
+increment) and unused-but-reserved words (`abstract`, `become`, …); `true`/`false` are included,
+matching Rust's own grammar, which classifies them as keywords rather than a separate literal
+kind (see `docs/rust-highlighting.md`).
+
 ### Adding a new language
 
 1. Create a new struct (e.g. `CLexer`) in `lexer.rs`.

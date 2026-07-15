@@ -10,7 +10,7 @@ pub enum TokenKind {
     /// Ordinary source text — default foreground color.
     Normal,
     /// Language keyword (`fn`, `let`, `if`, `while`, `return`, …).
-    _Keyword,
+    Keyword,
     /// Built-in or well-known type (`i32`, `String`, `int`, …).
     _Type,
     /// String literal (including the quotes).
@@ -129,8 +129,59 @@ fn is_comment_start(chars: &[char], i: usize) -> bool {
     chars[i] == '/' && chars.get(i + 1) == Some(&'/')
 }
 
-/// Does a string, char literal, number literal, or comment start at
-/// `chars[i]`? Shared by the Normal-run scan (stop here) and,
+/// Rust's control-flow/declaration keywords. Deliberately excludes
+/// primitive/std type names (that's the separate Types increment) and
+/// unused-but-reserved words (`abstract`, `become`, `box`, …), which
+/// essentially never appear in real code. Kept alphabetical (case folded
+/// together, e.g. `self`/`Self` sit next to each other) so it's easy for a
+/// human to scan and confirm a word is or isn't in the list.
+/// See docs/rust-highlighting.md.
+const KEYWORDS: &[&str] = &[
+    "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern",
+    "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub",
+    "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type",
+    "unsafe", "use", "where", "while",
+];
+
+/// A word starts at `chars[i]` if it's a letter or underscore not
+/// preceded by an alphanumeric character or underscore — the same
+/// left-boundary rule as `is_number_start`, applied to identifiers instead
+/// of digits.
+fn is_word_start(chars: &[char], i: usize) -> bool {
+    (chars[i].is_alphabetic() || chars[i] == '_')
+        && (i == 0 || !(chars[i - 1].is_alphanumeric() || chars[i - 1] == '_'))
+}
+
+/// If a word starts at `chars[start]`, scan it to its full extent (letters,
+/// digits, underscores) and check *that whole word* against `KEYWORDS`.
+/// Scanning the full word first — rather than matching a prefix — is what
+/// keeps "structure" from being misread as containing the keyword
+/// "struct", or "self_ref" as containing "self".
+///
+/// Returns the exclusive end index of the word if it's a keyword, `None`
+/// otherwise — a non-keyword word is not treated as a token start at all,
+/// so it keeps getting absorbed into the surrounding Normal run exactly
+/// like it was before this increment (no fragmentation cost for ordinary
+/// identifiers).
+fn find_keyword_end(chars: &[char], start: usize) -> Option<usize> {
+    if !is_word_start(chars, start) {
+        return None;
+    }
+    let len = chars.len();
+    let mut j = start;
+    while j < len && (chars[j].is_alphanumeric() || chars[j] == '_') {
+        j += 1;
+    }
+    let word: String = chars[start..j].iter().collect();
+    if KEYWORDS.contains(&word.as_str()) {
+        Some(j)
+    } else {
+        None
+    }
+}
+
+/// Does a string, char literal, number literal, comment, or keyword start
+/// at `chars[i]`? Shared by the Normal-run scan (stop here) and,
 /// individually, by the main loop's own checks (which branch also needs
 /// to know *which* kind matched, not just whether one did).
 fn token_starts_at(chars: &[char], i: usize) -> bool {
@@ -138,6 +189,7 @@ fn token_starts_at(chars: &[char], i: usize) -> bool {
         || (chars[i] == '\'' && find_char_literal_end(chars, i).is_some())
         || is_number_start(chars, i)
         || is_comment_start(chars, i)
+        || find_keyword_end(chars, i).is_some()
 }
 
 /// Tokenize a line using only the universal "number vs. normal" rule.
@@ -243,6 +295,20 @@ impl Lexer for RustLexer {
                     kind: TokenKind::Comment,
                 });
                 i = len;
+                continue;
+            }
+
+            // A non-keyword word (e.g. "structure", "self_ref") returns
+            // None here and simply isn't treated as a token start — it
+            // falls through into the Normal-run scan below like any other
+            // ordinary text.
+            if let Some(end) = find_keyword_end(&chars, i) {
+                tokens.push(Token {
+                    start: i,
+                    len: end - i,
+                    kind: TokenKind::Keyword,
+                });
+                i = end;
                 continue;
             }
 
@@ -453,14 +519,14 @@ mod tests {
 
     #[test]
     fn string_assigned_to_variable() {
-        // `let s = "hi";` → Normal("let s = "), String("\"hi\""), Normal(";")
-        let tokens = rust_tokens("let s = \"hi\";");
+        // `s = "hi";` → Normal("s = "), String("\"hi\""), Normal(";")
+        let tokens = rust_tokens("s = \"hi\";");
         assert_eq!(tokens.len(), 3);
         assert_eq!(tokens[0].kind, TokenKind::Normal);
         assert_eq!(
             tokens[1],
             Token {
-                start: 8,
+                start: 4,
                 len: 4,
                 kind: TokenKind::String
             }
@@ -468,7 +534,7 @@ mod tests {
         assert_eq!(
             tokens[2],
             Token {
-                start: 12,
+                start: 8,
                 len: 1,
                 kind: TokenKind::Normal
             }
@@ -526,14 +592,14 @@ mod tests {
         // No closing quote before end of line: per the multi-line-strings
         // deferral, the whole line stays Normal rather than being colored
         // as an (incorrectly) open-ended String.
-        let tokens = rust_tokens("let s = \"unterminated");
+        let tokens = rust_tokens("s = \"unterminated");
         assert_eq!(
             tokens.len(),
             1,
             "no closing quote: whole line should stay one Normal run"
         );
         assert_eq!(tokens[0].kind, TokenKind::Normal);
-        assert_eq!(tokens[0].len, 21);
+        assert_eq!(tokens[0].len, 17);
     }
 
     #[test]
@@ -614,13 +680,13 @@ mod tests {
 
     #[test]
     fn char_literal_assigned_to_variable() {
-        let tokens = rust_tokens("let c = 'x';");
+        let tokens = rust_tokens("c = 'x';");
         assert_eq!(tokens.len(), 3);
         assert_eq!(tokens[0].kind, TokenKind::Normal);
         assert_eq!(
             tokens[1],
             Token {
-                start: 8,
+                start: 4,
                 len: 3,
                 kind: TokenKind::String
             }
@@ -628,7 +694,7 @@ mod tests {
         assert_eq!(
             tokens[2],
             Token {
-                start: 11,
+                start: 7,
                 len: 1,
                 kind: TokenKind::Normal
             }
@@ -651,7 +717,7 @@ mod tests {
 
     #[test]
     fn lifetime_in_generic_bound_is_not_highlighted() {
-        let tokens = rust_tokens("fn foo<'a>()");
+        let tokens = rust_tokens("Vec<&'a str>");
         assert_eq!(
             tokens.len(),
             1,
@@ -693,14 +759,14 @@ mod tests {
 
     #[test]
     fn unterminated_char_literal_falls_back_to_normal() {
-        let tokens = rust_tokens("let c = 'x");
+        let tokens = rust_tokens("c = 'x");
         assert_eq!(
             tokens.len(),
             1,
             "no closing quote: whole line should stay one Normal run"
         );
         assert_eq!(tokens[0].kind, TokenKind::Normal);
-        assert_eq!(tokens[0].len, 10);
+        assert_eq!(tokens[0].len, 6);
     }
 
     // ── Line comments ───────────────────────────────────────────────
@@ -734,21 +800,21 @@ mod tests {
 
     #[test]
     fn comment_after_code() {
-        // `let x; // comment` -> Normal("let x; "), Comment("// comment")
-        let tokens = rust_tokens("let x; // comment");
+        // `x; // comment` -> Normal("x; "), Comment("// comment")
+        let tokens = rust_tokens("x; // comment");
         assert_eq!(tokens.len(), 2);
         assert_eq!(
             tokens[0],
             Token {
                 start: 0,
-                len: 7,
+                len: 3,
                 kind: TokenKind::Normal
             }
         );
         assert_eq!(
             tokens[1],
             Token {
-                start: 7,
+                start: 3,
                 len: 10,
                 kind: TokenKind::Comment
             }
@@ -839,6 +905,191 @@ mod tests {
         );
     }
 
+    // ── Keywords ────────────────────────────────────────────────────
+    #[test]
+    fn plain_keyword_is_single_token() {
+        let tokens = rust_tokens("fn");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 2,
+                kind: TokenKind::Keyword
+            }
+        );
+    }
+
+    #[test]
+    fn keyword_followed_by_text() {
+        // `return value` -> Keyword("return"), Normal(" value")
+        let tokens = rust_tokens("return value");
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 6,
+                kind: TokenKind::Keyword
+            }
+        );
+        assert_eq!(
+            tokens[1],
+            Token {
+                start: 6,
+                len: 6,
+                kind: TokenKind::Normal
+            }
+        );
+    }
+
+    #[test]
+    fn keyword_immediately_followed_by_punctuation() {
+        // No whitespace needed to close off the word: `if(x)` -> Keyword("if"), Normal("(x)")
+        let tokens = rust_tokens("if(x)");
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 2,
+                kind: TokenKind::Keyword
+            }
+        );
+        assert_eq!(
+            tokens[1],
+            Token {
+                start: 2,
+                len: 3,
+                kind: TokenKind::Normal
+            }
+        );
+    }
+
+    #[test]
+    fn true_is_a_keyword() {
+        let tokens = rust_tokens("true");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::Keyword);
+    }
+
+    #[test]
+    fn false_is_a_keyword() {
+        let tokens = rust_tokens("false");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::Keyword);
+    }
+
+    #[test]
+    fn lowercase_self_is_a_keyword() {
+        let tokens = rust_tokens("self");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::Keyword);
+    }
+
+    #[test]
+    fn capital_self_is_a_keyword() {
+        let tokens = rust_tokens("Self");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::Keyword);
+    }
+
+    #[test]
+    fn all_caps_self_is_not_a_keyword() {
+        // Case-sensitivity regression: Rust identifiers are case-sensitive,
+        // and "SELF" is not in the keyword list.
+        let tokens = rust_tokens("SELF");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::Normal);
+    }
+
+    #[test]
+    fn word_with_keyword_as_prefix_is_not_split() {
+        // "structure" must not be misread as containing the keyword
+        // "struct" — the scan grabs the whole word before checking.
+        let tokens = rust_tokens("structure");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 9,
+                kind: TokenKind::Normal
+            }
+        );
+    }
+
+    #[test]
+    fn word_with_keyword_plus_suffix_is_not_split() {
+        // "self_ref" is a whole identifier, not the keyword "self".
+        let tokens = rust_tokens("self_ref");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 8,
+                kind: TokenKind::Normal
+            }
+        );
+    }
+
+    #[test]
+    fn multiple_keywords_and_identifiers_on_one_line() {
+        // `let mut x = 5;` -> Keyword("let"), Normal(" "), Keyword("mut"),
+        // Normal(" x = "), Number("5"), Normal(";")
+        let tokens = rust_tokens("let mut x = 5;");
+        assert_eq!(tokens.len(), 6);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 3,
+                kind: TokenKind::Keyword
+            }
+        );
+        assert_eq!(
+            tokens[1],
+            Token {
+                start: 3,
+                len: 1,
+                kind: TokenKind::Normal
+            }
+        );
+        assert_eq!(
+            tokens[2],
+            Token {
+                start: 4,
+                len: 3,
+                kind: TokenKind::Keyword
+            }
+        );
+        assert_eq!(
+            tokens[3],
+            Token {
+                start: 7,
+                len: 5,
+                kind: TokenKind::Normal
+            }
+        );
+        assert_eq!(
+            tokens[4],
+            Token {
+                start: 12,
+                len: 1,
+                kind: TokenKind::Number
+            }
+        );
+        assert_eq!(
+            tokens[5],
+            Token {
+                start: 13,
+                len: 1,
+                kind: TokenKind::Normal
+            }
+        );
+    }
+
     // ── Edge cases ──────────────────────────────────────────────────
     #[test]
     fn empty_line_produces_no_tokens() {
@@ -848,7 +1099,7 @@ mod tests {
 
     #[test]
     fn line_with_no_digits_is_all_normal() {
-        let tokens = rust_tokens("let x = foo;");
+        let tokens = rust_tokens("x = foo;");
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].kind, TokenKind::Normal);
     }

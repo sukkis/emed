@@ -47,6 +47,7 @@ pub struct Theme {
     pub number_fg: ThemeColor,
     pub string_fg: ThemeColor,
     pub comment_fg: ThemeColor,
+    pub keyword_fg: ThemeColor,
 }
 
 impl Theme {
@@ -70,6 +71,7 @@ impl Theme {
             number_fg: ThemeColor::Yellow,
             string_fg: ThemeColor::DarkGreen,
             comment_fg: ThemeColor::DarkGrey,
+            keyword_fg: ThemeColor::Cyan,
         }
     }
 
@@ -85,6 +87,7 @@ impl Theme {
             number_fg: ThemeColor::Yellow,
             string_fg: ThemeColor::DarkGreen,
             comment_fg: ThemeColor::DarkGrey,
+            keyword_fg: ThemeColor::Magenta,
         }
     }
 }
