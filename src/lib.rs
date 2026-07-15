@@ -553,8 +553,9 @@ impl EditorState {
     /// found something, move the cursor there. No match leaves the cursor
     /// exactly where it was.
     fn refresh_search_match(&mut self) {
-        let query_match = match self.search.as_ref() {
-            Some(session) => session.current_match(&self.save_to_string()),
+        let haystack = self.save_to_string();
+        let query_match = match self.search.as_mut() {
+            Some(session) => session.current_match(&haystack),
             None => return,
         };
 

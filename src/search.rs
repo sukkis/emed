@@ -118,6 +118,14 @@ pub struct SearchSession {
     /// typing — typing always re-anchors to `origin` in whichever direction
     /// is currently active.
     direction: Direction,
+    /// Whether the most recent match attempt (`current_match` or `repeat`)
+    /// succeeded. Drives the "Failing I-search" status-line indicator.
+    /// Stored rather than recomputed live, because a live recompute from
+    /// `query` alone would be wrong right after a wrapped `repeat`: it only
+    /// re-checks `haystack[..origin]`/`haystack[origin..]` (no wrap), so it
+    /// could report "failing" even though `repeat` just wrapped around and
+    /// landed on a real match elsewhere in the buffer.
+    found: bool,
 }
 
 impl SearchSession {
@@ -126,6 +134,7 @@ impl SearchSession {
             query: String::new(),
             origin,
             direction,
+            found: true,
         }
     }
 
@@ -140,8 +149,10 @@ impl SearchSession {
     /// Where the current query matches in `haystack`, searching forward from
     /// `origin` only — no wraparound. Wrapping is reserved for the explicit
     /// "search again" action (Commit 4's `search_repeat`), not for typing.
-    pub fn current_match(&self, haystack: &str) -> Option<usize> {
-        find_from(haystack, &self.query, self.origin, false, self.direction)
+    pub fn current_match(&mut self, haystack: &str) -> Option<usize> {
+        let result = find_from(haystack, &self.query, self.origin, false, self.direction);
+        self.found = result.is_some();
+        result
     }
 
     /// Move to the next (or previous, if `direction` is `Backward`)
@@ -160,13 +171,23 @@ impl SearchSession {
             Direction::Forward => after + 1,
             Direction::Backward => after,
         };
-        find_from(haystack, &self.query, start, true, direction)
+        let result = find_from(haystack, &self.query, start, true, direction);
+        self.found = result.is_some();
+        result
     }
 
     /// The char index the search began at — used to restore the cursor if
     /// the search is cancelled.
     pub fn origin(&self) -> usize {
         self.origin
+    }
+
+    /// Whether the query currently has no match — drives the "Failing
+    /// I-search" status-line prefix. An empty query is never "failing"
+    /// (real Emacs shows plain "I-search:" immediately after C-s/C-r,
+    /// before anything's been typed), regardless of `found`'s stored value.
+    pub fn is_failing(&self) -> bool {
+        !self.query.is_empty() && !self.found
     }
 }
 
@@ -310,7 +331,7 @@ mod tests {
     #[test]
     fn empty_query_has_no_match() {
         // Mirrors find_from's own rule: an empty needle never matches.
-        let session = SearchSession::new(0, Direction::Forward);
+        let mut session = SearchSession::new(0, Direction::Forward);
         assert_eq!(session.current_match("hello world"), None);
     }
 
@@ -436,5 +457,67 @@ mod tests {
         // match.
         assert_eq!(session.repeat(haystack, 8, Direction::Backward), Some(4));
         assert_eq!(session.repeat(haystack, 4, Direction::Backward), Some(0));
+    }
+
+    // --- SearchSession: found / is_failing, for the "Failing I-search" indicator ---
+    //
+    // `found` is updated as a side effect of whichever call actually
+    // computed a match (`current_match` or `repeat`) — not recomputed live
+    // from the query — so it reflects what's really on screen even after a
+    // wrapped `repeat` lands on a match that a fresh no-wrap check from
+    // `origin` wouldn't find on its own.
+
+    #[test]
+    fn is_failing_false_for_a_brand_new_session() {
+        // No query typed yet — never "failing", per decision 11.
+        let session = SearchSession::new(0, Direction::Forward);
+        assert!(!session.is_failing());
+    }
+
+    #[test]
+    fn is_failing_false_after_a_successful_match() {
+        let mut session = SearchSession::new(0, Direction::Forward);
+        for c in "cat".chars() {
+            session.push_char(c);
+        }
+        session.current_match("cat");
+        assert!(!session.is_failing());
+    }
+
+    #[test]
+    fn is_failing_true_after_no_match() {
+        let mut session = SearchSession::new(0, Direction::Forward);
+        session.push_char('z');
+        session.current_match("cat"); // no "z" in "cat"
+        assert!(session.is_failing());
+    }
+
+    #[test]
+    fn is_failing_false_once_query_is_backspaced_to_empty() {
+        let mut session = SearchSession::new(0, Direction::Forward);
+        session.push_char('z');
+        session.current_match("cat"); // fails
+        assert!(session.is_failing());
+
+        session.backspace(); // query now empty again
+        assert!(!session.is_failing()); // empty query is never "failing"
+    }
+
+    #[test]
+    fn is_failing_tracks_repeat_too() {
+        let mut session = SearchSession::new(0, Direction::Forward);
+        for c in "cat".chars() {
+            session.push_char(c);
+        }
+        assert_eq!(
+            session.repeat("cat cat cat", 0, Direction::Forward),
+            Some(4)
+        );
+        assert!(!session.is_failing());
+
+        // "catz" appears nowhere in the haystack.
+        session.push_char('z');
+        assert_eq!(session.repeat("cat cat cat", 4, Direction::Forward), None);
+        assert!(session.is_failing());
     }
 }
