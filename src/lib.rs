@@ -83,7 +83,7 @@ pub enum EditorCommand {
     Backspace,
     SaveFile,
     PromptSaveAs,
-    StartSearch,
+    StartSearch(Direction),
     ToggleVisualLineMode,
     NoOp,
 }
@@ -373,8 +373,8 @@ impl EditorState {
             }
             EditorCommand::SaveFile | EditorCommand::PromptSaveAs => ApplyResult::NoChange,
 
-            EditorCommand::StartSearch => {
-                self.search_start(Direction::Forward);
+            EditorCommand::StartSearch(direction) => {
+                self.search_start(direction);
                 ApplyResult::Changed
             }
 
@@ -853,7 +853,8 @@ pub fn command_from_key(
         InputKey::Delete => EditorCommand::DeleteChar,
         InputKey::Backspace => EditorCommand::Backspace,
         InputKey::Char(c) => EditorCommand::InsertChar(c),
-        InputKey::Ctrl('s') => EditorCommand::StartSearch,
+        InputKey::Ctrl('s') => EditorCommand::StartSearch(Direction::Forward),
+        InputKey::Ctrl('r') => EditorCommand::StartSearch(Direction::Backward),
         InputKey::Ctrl('c') => {
             *saw_ctrl_c = true;
             EditorCommand::NoOp

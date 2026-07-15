@@ -153,7 +153,7 @@ fn start_search_command_begins_a_search_session() {
     let mut state = EditorState::new((80, 24));
     state.load_document("abc\n", Some("test.txt"));
 
-    let result = state.apply_command(EditorCommand::StartSearch);
+    let result = state.apply_command(EditorCommand::StartSearch(Direction::Forward));
 
     assert!(state.is_searching());
     assert_eq!(result, ApplyResult::Changed);

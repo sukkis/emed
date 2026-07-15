@@ -1,3 +1,4 @@
+use emed_core::search::Direction;
 use emed_core::{EditorCommand, InputKey, command_from_key, escapes_search};
 
 #[test]
@@ -75,7 +76,19 @@ fn plain_ctrl_s_starts_search() {
     let mut saw_ctrl_x = false;
     let mut saw_ctrl_c = false;
     let cmd = command_from_key(InputKey::Ctrl('s'), &mut saw_ctrl_x, &mut saw_ctrl_c);
-    assert_eq!(cmd, EditorCommand::StartSearch);
+    assert_eq!(cmd, EditorCommand::StartSearch(Direction::Forward));
+    assert!(!saw_ctrl_x);
+}
+
+#[test]
+fn plain_ctrl_r_starts_search_backward() {
+    // Cold C-r begins a session already searching backward — mirrors real
+    // Emacs (C-r cold == isearch-backward), per docs/search-reverse.md
+    // decision 5.
+    let mut saw_ctrl_x = false;
+    let mut saw_ctrl_c = false;
+    let cmd = command_from_key(InputKey::Ctrl('r'), &mut saw_ctrl_x, &mut saw_ctrl_c);
+    assert_eq!(cmd, EditorCommand::StartSearch(Direction::Backward));
     assert!(!saw_ctrl_x);
 }
 

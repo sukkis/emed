@@ -241,8 +241,8 @@ fn apply_command(
             state.backspace();
             ui.draw_screen(state)?;
         }
-        EditorCommand::StartSearch => {
-            state.search_start(Direction::Forward);
+        EditorCommand::StartSearch(direction) => {
+            state.search_start(direction);
             ui.draw_screen(state)?;
         }
         EditorCommand::ToggleVisualLineMode => {
