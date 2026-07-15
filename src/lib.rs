@@ -634,6 +634,14 @@ impl EditorState {
             .is_some_and(|session| session.is_failing())
     }
 
+    /// Whether the active search is currently searching backward. `false`
+    /// when no search is in progress.
+    pub fn is_search_backward(&self) -> bool {
+        self.search
+            .as_ref()
+            .is_some_and(|session| session.direction() == Direction::Backward)
+    }
+
     /// What the help line at the bottom of the screen should currently
     /// show: the "Save as" prompt input, the active search query, or the
     /// default help message — in that priority order.
@@ -641,7 +649,17 @@ impl EditorState {
         if let Some(ref input) = self.prompt_buffer {
             format!("Save as: {}", input)
         } else if let Some(query) = self.search_query() {
-            format!("I-search: {}", query)
+            let failing = if self.is_search_failing() {
+                "Failing "
+            } else {
+                ""
+            };
+            let backward = if self.is_search_backward() {
+                " backward"
+            } else {
+                ""
+            };
+            format!("{failing}I-search{backward}: {query}")
         } else {
             self.help_message.clone()
         }

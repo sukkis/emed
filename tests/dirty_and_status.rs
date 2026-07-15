@@ -190,6 +190,44 @@ fn status_help_line_shows_search_query_when_searching() {
     assert_eq!(state.status_help_line(), "I-search: bind");
 }
 
+#[test]
+fn status_help_line_shows_backward_wording_when_searching_backward() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("bind bindings\n", Some("test.txt"));
+    state.set_cursor(13, 0); // end of buffer, so there's text before origin
+    state.search_start(Direction::Backward);
+    for c in "bind".chars() {
+        state.search_push_char(c);
+    }
+    assert_eq!(state.status_help_line(), "I-search backward: bind");
+}
+
+#[test]
+fn status_help_line_shows_failing_prefix_when_query_has_no_match() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("cat\n", Some("test.txt"));
+    state.search_start(Direction::Forward);
+    state.search_push_char('z'); // "z" is nowhere in "cat"
+    assert_eq!(state.status_help_line(), "Failing I-search: z");
+}
+
+#[test]
+fn status_help_line_shows_failing_and_backward_wording_together() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("cat\n", Some("test.txt"));
+    state.search_start(Direction::Backward);
+    state.search_push_char('z');
+    assert_eq!(state.status_help_line(), "Failing I-search backward: z");
+}
+
+#[test]
+fn status_help_line_never_shows_failing_for_empty_query() {
+    let mut state = EditorState::new((80, 24));
+    state.load_document("cat\n", Some("test.txt"));
+    state.search_start(Direction::Forward);
+    assert_eq!(state.status_help_line(), "I-search: ");
+}
+
 /*==========================================================================*
  * status_line(): the real, testable string-building logic behind
  * queue_status_information

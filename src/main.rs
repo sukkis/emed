@@ -101,6 +101,7 @@ fn handle_search_key(key: InputKey, ui: &mut EditorUi, state: &mut EditorState) 
         InputKey::Char(c) => state.search_push_char(c),
         InputKey::Backspace => state.search_backspace(),
         InputKey::Ctrl('s') => state.search_repeat(Direction::Forward),
+        InputKey::Ctrl('r') => state.search_repeat(Direction::Backward),
         InputKey::Enter => state.search_accept(),
         InputKey::Ctrl('g') => state.search_cancel(),
         _ => {} // ignore other keys while searching

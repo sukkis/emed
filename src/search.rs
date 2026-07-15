@@ -182,6 +182,12 @@ impl SearchSession {
         self.origin
     }
 
+    /// The direction the session currently searches in — for the "I-search
+    /// backward" status-line wording.
+    pub fn direction(&self) -> Direction {
+        self.direction
+    }
+
     /// Whether the query currently has no match — drives the "Failing
     /// I-search" status-line prefix. An empty query is never "failing"
     /// (real Emacs shows plain "I-search:" immediately after C-s/C-r,
