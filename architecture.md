@@ -144,40 +144,60 @@ as numbers — they're part of an identifier. Standalone literals like `42`, `(1
 
 ## Incremental search
 
-Search is built as three layers, each with one job:
+Search is built as three layers, each with one job. It's direction-aware throughout — one
+`Direction { Forward, Backward }` enum (`search.rs`), threaded down from `EditorCommand` to
+the pure algorithm, rather than separate forward/backward code paths:
 
-1. **`find_from(haystack, needle, start, wrap)`** (`search.rs`) — the pure algorithm. Works in
-   char indices (not byte offsets), so callers never have to think about UTF-8. An empty
-   needle never matches (Emacs behaviour: an empty query doesn't move point).
+1. **`find_from(haystack, needle, start, wrap, direction)`** (`search.rs`) — the pure
+   algorithm. Works in char indices (not byte offsets), so callers never have to think about
+   UTF-8. An empty needle never matches (Emacs behaviour: an empty query doesn't move point).
+   `Forward` searches `haystack[start..]` (`.find`, first match); `Backward` searches
+   `haystack[..start]` (`.rfind`, last match whose *end* is `<= start`) — symmetric slicing,
+   same wraparound trick in both directions (searching the whole string is safe once the
+   half-string search has already come up empty).
 
 2. **`SearchSession`** (`search.rs`) — bookkeeping for one in-progress search: the `query`
-   typed so far, and the `origin` char index the cursor was at when the search began. It
-   exposes two different search policies, deliberately kept apart:
-   - `current_match(haystack)` — searches forward from `origin`, **no wraparound**. Used as
-     you type or backspace, so the match "grows" from where you started rather than drifting.
-   - `repeat_match(haystack, after)` — searches forward from `after + 1` (the position the
-     cursor is already at), **with wraparound**. Used only by the explicit "search again"
-     action, so it never re-reports the match you're already sitting on.
+   typed so far, the `origin` char index the cursor was at when the search began, the current
+   `direction`, and `found` (whether the last match attempt succeeded, for the "Failing
+   I-search" indicator — stored rather than recomputed live, since a live recompute from
+   `query` alone would be wrong right after a wrapped `repeat`). It exposes two different
+   search policies, deliberately kept apart:
+   - `current_match(haystack)` — searches from `origin` in the session's current `direction`,
+     **no wraparound**. Used as you type or backspace, so the match "grows" from where you
+     started rather than drifting. Never changes `direction` itself.
+   - `repeat(haystack, after, direction)` — searches from `after` (± 1, direction-dependent —
+     never re-reporting the match already under the cursor) in the *given* `direction`, **with
+     wraparound**, and records that direction as the session's new one. This is what lets
+     `C-s`/`C-r` flip an active session's direction mid-search, stepping from the current
+     position rather than jumping back to `origin`.
 
-   Both policies live here rather than in `EditorState`, because `origin` is a private field —
-   this is the only way other modules can get an answer without reaching into `SearchSession`'s
-   internals.
+   Both policies live here rather than in `EditorState`, because `origin`/`direction`/`found`
+   are private fields — this is the only way other modules can get an answer without reaching
+   into `SearchSession`'s internals.
 
-3. **`EditorState` driver methods** — `search_start`, `search_push_char`, `search_backspace`,
-   `search_repeat`, `search_accept`, `search_cancel`, `is_searching`, `search_query`. These
-   convert a found char index into a `(cx, cy)` cursor position (`char_index_to_cursor`) and
-   move the cursor there; on no match, the cursor is left exactly where it was. `search_cancel`
-   restores the cursor to `origin`; `search_accept` just ends the session, leaving the cursor
-   at the match.
+3. **`EditorState` driver methods** — `search_start(direction)`, `search_push_char`,
+   `search_backspace`, `search_repeat(direction)`, `search_accept`, `search_cancel`,
+   `is_searching`, `search_query`, `is_search_failing`, `is_search_backward`. These convert a
+   found char index into a `(cx, cy)` cursor position (`char_index_to_cursor`) and move the
+   cursor there; on no match, the cursor is left exactly where it was. `search_cancel` restores
+   the cursor to `origin`; `search_accept` just ends the session, leaving the cursor at the
+   match.
 
-`main.rs`'s `handle_search_key` maps keys to these driver methods and is the only untested
+`EditorCommand::StartSearch(Direction)` carries the direction from `command_from_key` — plain
+`Ctrl+s` produces `Forward`, plain `Ctrl+r` produces `Backward` (cold-start `Ctrl+r` begins a
+session already searching backward, matching real Emacs' `isearch-backward`). `main.rs`'s
+`handle_search_key` maps mid-search keys to the driver methods above and is the only untested
 layer — it's pure dispatch to methods that are already covered by tests, and can't
 meaningfully be unit tested itself (it needs a real `crossterm::Event`), matching how
 `handle_prompt_key` already works.
 
 The help line at the bottom of the screen shows the query while searching
 (`EditorState::status_help_line`), with priority: "Save as" prompt, then active search query,
-then the default help message.
+then the default help message. The search-query line itself composes two independent optional
+fragments around "I-search": a `"Failing "` prefix when `is_search_failing()` (never shown for
+an empty query, regardless of `found`'s stored value — matches real Emacs, which shows plain
+`I-search:` immediately after `C-s`/`C-r`), and a `" backward"` suffix when
+`is_search_backward()` — e.g. `"Failing I-search backward: xyz"`.
 
 ## Soft line wrapping (`visual_line_mode`)
 

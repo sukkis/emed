@@ -3,6 +3,7 @@ use crossterm::{
     event::{Event, KeyCode, read},
     terminal,
 };
+use emed_core::search::Direction;
 use emed_core::{
     DEFAULT_HELP_MESSAGE, EditorCommand, EditorState, InputKey, QUIT_CONFIRM_COUNT,
     cancels_pending_quit, command_from_key, escapes_search,
@@ -99,7 +100,8 @@ fn handle_search_key(key: InputKey, ui: &mut EditorUi, state: &mut EditorState) 
     match key {
         InputKey::Char(c) => state.search_push_char(c),
         InputKey::Backspace => state.search_backspace(),
-        InputKey::Ctrl('s') => state.search_repeat(),
+        InputKey::Ctrl('s') => state.search_repeat(Direction::Forward),
+        InputKey::Ctrl('r') => state.search_repeat(Direction::Backward),
         InputKey::Enter => state.search_accept(),
         InputKey::Ctrl('g') => state.search_cancel(),
         _ => {} // ignore other keys while searching
@@ -240,8 +242,8 @@ fn apply_command(
             state.backspace();
             ui.draw_screen(state)?;
         }
-        EditorCommand::StartSearch => {
-            state.search_start();
+        EditorCommand::StartSearch(direction) => {
+            state.search_start(direction);
             ui.draw_screen(state)?;
         }
         EditorCommand::ToggleVisualLineMode => {

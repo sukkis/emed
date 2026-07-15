@@ -11,7 +11,9 @@ Early prototype — expect rough edges and frequent changes.
 - `Ctrl+x` then `Ctrl+c` — quit (Emacs-style)
 - `Ctrl+x` then `Ctrl+s` — save file (prompts for filename if unknown)
 - `Ctrl+g` — cancel prompt, or cancel an in-progress search (restores cursor)
-- `Ctrl+s` — start incremental search; while searching, type to refine, `Ctrl+s` again to jump to the next match (wrapping), `Enter` to accept
+- `Ctrl+s` — start incremental search forward; `Ctrl+r` — start incremental search backward.
+  While searching, type to refine, `Ctrl+s`/`Ctrl+r` to jump to the next/previous match
+  (wrapping, and flipping direction if you switch keys mid-search), `Enter` to accept
 - `Ctrl+c` then `l` — toggle soft line wrap (`visual_line_mode`); wrapped lines break at word boundaries and cursor movement follows the wrapped rows
 - Typing, Enter, Backspace, Delete — edit text as expected
 
@@ -54,8 +56,10 @@ See [architecture.md](architecture.md) for design notes, module layout, and inte
 - [x] Tab rendering (configurable width)
 - [x] Unicode display-width support
 - [x] Incremental search (find), forward only
-- [ ] Reverse incremental search (`C-r`) — jump back through earlier matches
-- [x] Syntax highlighting (number literals; word-boundary aware)
+- [x] Reverse incremental search (`C-r`) — jump back through earlier matches
+- [x] Syntax highlighting (number literals only; word-boundary aware) — first slice
+- [ ] Syntax highlighting for Rust (keywords, types, strings, comments, operators) —
+      kilo highlights C; Rust is the equivalent language here
 
 Extras
 
@@ -65,6 +69,8 @@ Extras
 - [x] Soft line wrapping (`visual_line_mode`, word-wrap, toggled with `C-c l`)
 - [x] Syntax highlighting in wrapped mode (same token coloring as unwrapped)
 - [ ] Indent-aware wrap prefix for soft-wrapped lines
+- [ ] Syntax highlighting for Markdown
+- [ ] Syntax highlighting of search matches
 - [ ] Cycle to next theme with a keybinding (e.g. `C-c t`, Emacs-style) — needs a design
       decision first: theme currently lives on `EditorUi`, not `EditorState`, so a
       command-driven toggle needs somewhere testable to track "current theme"

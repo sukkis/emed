@@ -3,7 +3,7 @@ pub mod search;
 pub mod wrap;
 use lexer::{Lexer, Token, lexer_for_file_type};
 use ropey::{Rope, RopeSlice};
-use search::SearchSession;
+use search::{Direction, SearchSession};
 use std::path::Path;
 use unicode_width::UnicodeWidthChar;
 
@@ -83,7 +83,7 @@ pub enum EditorCommand {
     Backspace,
     SaveFile,
     PromptSaveAs,
-    StartSearch,
+    StartSearch(Direction),
     ToggleVisualLineMode,
     NoOp,
 }
@@ -373,8 +373,8 @@ impl EditorState {
             }
             EditorCommand::SaveFile | EditorCommand::PromptSaveAs => ApplyResult::NoChange,
 
-            EditorCommand::StartSearch => {
-                self.search_start();
+            EditorCommand::StartSearch(direction) => {
+                self.search_start(direction);
                 ApplyResult::Changed
             }
 
@@ -544,17 +544,18 @@ impl EditorState {
     }
 
     /// Begin an incremental search, anchored at the current cursor position.
-    pub fn search_start(&mut self) {
+    pub fn search_start(&mut self, direction: Direction) {
         let origin = self.text.line_to_char(self.cy) + self.cx;
-        self.search = Some(SearchSession::new(origin));
+        self.search = Some(SearchSession::new(origin, direction));
     }
 
     /// Re-run the active session's match against the whole buffer and, if it
     /// found something, move the cursor there. No match leaves the cursor
     /// exactly where it was.
     fn refresh_search_match(&mut self) {
-        let query_match = match self.search.as_ref() {
-            Some(session) => session.current_match(&self.save_to_string()),
+        let haystack = self.save_to_string();
+        let query_match = match self.search.as_mut() {
+            Some(session) => session.current_match(&haystack),
             None => return,
         };
 
@@ -583,14 +584,14 @@ impl EditorState {
         self.refresh_search_match();
     }
 
-    /// Move to the next occurrence of the active query, wrapping around
-    /// the buffer if necessary. Does nothing if no search is in progress.
-    pub fn search_repeat(&mut self) {
-        let next_match = match self.search.as_ref() {
-            Some(session) => {
-                let current = self.text.line_to_char(self.cy) + self.cx;
-                session.repeat_match(&self.save_to_string(), current)
-            }
+    /// Move to the next (or previous, if `direction` is `Backward`)
+    /// occurrence of the active query, wrapping around the buffer if
+    /// necessary. Does nothing if no search is in progress.
+    pub fn search_repeat(&mut self, direction: Direction) {
+        let haystack = self.save_to_string();
+        let current = self.text.line_to_char(self.cy) + self.cx;
+        let next_match = match self.search.as_mut() {
+            Some(session) => session.repeat(&haystack, current, direction),
             None => return,
         };
 
@@ -625,6 +626,22 @@ impl EditorState {
         self.search.as_ref().map(|session| session.query.as_str())
     }
 
+    /// Whether the active search's query currently has no match. `false`
+    /// when no search is in progress.
+    pub fn is_search_failing(&self) -> bool {
+        self.search
+            .as_ref()
+            .is_some_and(|session| session.is_failing())
+    }
+
+    /// Whether the active search is currently searching backward. `false`
+    /// when no search is in progress.
+    pub fn is_search_backward(&self) -> bool {
+        self.search
+            .as_ref()
+            .is_some_and(|session| session.direction() == Direction::Backward)
+    }
+
     /// What the help line at the bottom of the screen should currently
     /// show: the "Save as" prompt input, the active search query, or the
     /// default help message — in that priority order.
@@ -632,7 +649,17 @@ impl EditorState {
         if let Some(ref input) = self.prompt_buffer {
             format!("Save as: {}", input)
         } else if let Some(query) = self.search_query() {
-            format!("I-search: {}", query)
+            let failing = if self.is_search_failing() {
+                "Failing "
+            } else {
+                ""
+            };
+            let backward = if self.is_search_backward() {
+                " backward"
+            } else {
+                ""
+            };
+            format!("{failing}I-search{backward}: {query}")
         } else {
             self.help_message.clone()
         }
@@ -844,7 +871,8 @@ pub fn command_from_key(
         InputKey::Delete => EditorCommand::DeleteChar,
         InputKey::Backspace => EditorCommand::Backspace,
         InputKey::Char(c) => EditorCommand::InsertChar(c),
-        InputKey::Ctrl('s') => EditorCommand::StartSearch,
+        InputKey::Ctrl('s') => EditorCommand::StartSearch(Direction::Forward),
+        InputKey::Ctrl('r') => EditorCommand::StartSearch(Direction::Backward),
         InputKey::Ctrl('c') => {
             *saw_ctrl_c = true;
             EditorCommand::NoOp
