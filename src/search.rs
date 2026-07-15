@@ -13,8 +13,9 @@ pub enum Direction {
     Backward,
 }
 
-/// Find the next occurrence of `needle` in `haystack`, starting the search at
-/// char index `start`.
+/// Find the nearest occurrence of `needle` in `haystack` on the `direction`
+/// side of char index `start` — at or after `start` when `Forward`, at or
+/// before `start` when `Backward`.
 ///
 /// Returns the **char index** of the start of the match, or `None` if there is
 /// no match.
@@ -23,11 +24,11 @@ pub enum Direction {
 /// - An empty `needle` never matches (returns `None`).  This mirrors Emacs,
 ///   where an empty incremental-search query does not move point.
 /// - `start` is clamped to the length of `haystack`; a `start` past the end
-///   simply means "no match from here".
-/// - If `wrap` is `true` and no match is found in `haystack[start..]`, the
-///   search continues from the beginning of the buffer (so the whole text is
-///   covered exactly once).  If `wrap` is `false`, only `haystack[start..]`
-///   is searched.
+///   (or, for `Backward`, before the start) simply means "no match from here".
+/// - If `wrap` is `true` and no match is found on the `direction` side of
+///   `start`, the search continues from the other end of the buffer (so the
+///   whole text is covered exactly once). If `wrap` is `false`, only the
+///   `direction` side of `start` is searched.
 pub fn find_from(
     haystack: &str,
     needle: &str,
@@ -146,9 +147,10 @@ impl SearchSession {
         self.query.pop();
     }
 
-    /// Where the current query matches in `haystack`, searching forward from
-    /// `origin` only — no wraparound. Wrapping is reserved for the explicit
-    /// "search again" action (Commit 4's `search_repeat`), not for typing.
+    /// Where the current query matches in `haystack`, searching from `origin`
+    /// in the session's current `direction` only — no wraparound. Wrapping is
+    /// reserved for the explicit "search again" action (`repeat`), not for
+    /// typing.
     pub fn current_match(&mut self, haystack: &str) -> Option<usize> {
         let result = find_from(haystack, &self.query, self.origin, false, self.direction);
         self.found = result.is_some();
@@ -383,7 +385,10 @@ mod tests {
     // `after` is where the cursor already is (the match `current_match`
     // already found and jumped to). Forward `repeat` finds the *next* one
     // past that — never `after` itself — which is why the first case below
-    // is asked to move from 0 to 4, not confirm 0 again.
+    // is asked to move from 0 to 4, not confirm 0 again. `repeat` also
+    // performs the step *and* records the direction it was asked to search
+    // in, which is what lets C-s/C-r flip an active session's direction
+    // mid-search (covered further down, once both directions are in play).
 
     #[test]
     fn repeat_forward_finds_next_occurrence_after_given_position() {
@@ -410,12 +415,6 @@ mod tests {
             Some(0)
         );
     }
-
-    // --- SearchSession: repeat(direction), replacing repeat_match ---
-    //
-    // `repeat` both performs the step *and* records the direction it was
-    // asked to search in, which is what lets C-s/C-r flip an active
-    // session's direction mid-search.
 
     #[test]
     fn repeat_backward_finds_previous_occurrence_before_given_position() {
