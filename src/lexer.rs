@@ -91,6 +91,45 @@ fn find_string_end(chars: &[char], start: usize) -> Option<usize> {
     None
 }
 
+/// If `chars[start]` is an opening `'`, find the index of the closing `'`
+/// of a char literal — but only for the narrow, fixed-length shape a char
+/// literal actually has: one plain character, or one backslash-escaped
+/// character (same generic "\` skips the next char" rule as strings),
+/// immediately followed by a closing `'`.
+///
+/// This is what disambiguates a char literal from a lifetime (`'a`,
+/// `'static`): a lifetime is never followed by a bare `'`, so it simply
+/// never matches this fixed-length shape and `None` is returned — the `'`
+/// is then left as ordinary text by the caller, same as an unterminated
+/// string. Unicode escapes (`'\u{1F600}'`) are out of scope for now (see
+/// docs/rust-highlighting.md) since they aren't fixed-length.
+fn find_char_literal_end(chars: &[char], start: usize) -> Option<usize> {
+    let len = chars.len();
+    if start + 1 >= len {
+        return None;
+    }
+    let close = if chars[start + 1] == '\\' {
+        start + 3
+    } else {
+        start + 2
+    };
+    if close < len && chars[close] == '\'' {
+        Some(close)
+    } else {
+        None
+    }
+}
+
+/// Does a string, char literal, or number literal start at `chars[i]`?
+/// Shared by the Normal-run scan (stop here) and, individually, by the
+/// main loop's own checks (which branch also needs to know *which* kind
+/// matched, not just whether one did).
+fn token_starts_at(chars: &[char], i: usize) -> bool {
+    (chars[i] == '"' && find_string_end(chars, i).is_some())
+        || (chars[i] == '\'' && find_char_literal_end(chars, i).is_some())
+        || is_number_start(chars, i)
+}
+
 /// Tokenize a line using only the universal "number vs. normal" rule.
 ///
 /// Every language-specific lexer can call this as a baseline pass.
@@ -159,6 +198,21 @@ impl Lexer for RustLexer {
                 continue;
             }
 
+            // A lifetime (`'a`, `'static`) never matches this fixed-length
+            // shape, so it falls through untouched — see
+            // find_char_literal_end's doc comment.
+            if chars[i] == '\''
+                && let Some(end) = find_char_literal_end(&chars, i)
+            {
+                tokens.push(Token {
+                    start: i,
+                    len: end - i + 1,
+                    kind: TokenKind::String,
+                });
+                i = end + 1;
+                continue;
+            }
+
             if is_number_start(&chars, i) {
                 let start = i;
                 while i < len && chars[i].is_ascii_digit() {
@@ -173,10 +227,7 @@ impl Lexer for RustLexer {
             }
 
             let start = i;
-            while i < len
-                && !(chars[i] == '"' && find_string_end(&chars, i).is_some())
-                && !is_number_start(&chars, i)
-            {
+            while i < len && !token_starts_at(&chars, i) {
                 i += 1;
             }
             tokens.push(Token {
@@ -480,6 +531,156 @@ mod tests {
                 kind: TokenKind::String
             }
         );
+    }
+
+    // ── Char literals ───────────────────────────────────────────────
+    #[test]
+    fn plain_char_literal_is_single_token() {
+        let tokens = rust_tokens("'x'");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 3,
+                kind: TokenKind::String
+            }
+        );
+    }
+
+    #[test]
+    fn digit_char_literal_is_not_split_into_a_number_token() {
+        let tokens = rust_tokens("'0'");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 3,
+                kind: TokenKind::String
+            }
+        );
+    }
+
+    #[test]
+    fn escaped_quote_char_literal() {
+        // Target text: '\''  (char literal for a single quote)
+        let tokens = rust_tokens("'\\''");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 4,
+                kind: TokenKind::String
+            }
+        );
+    }
+
+    #[test]
+    fn escaped_backslash_char_literal() {
+        // Target text: '\\'  (char literal for a backslash)
+        let tokens = rust_tokens("'\\\\'");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 4,
+                kind: TokenKind::String
+            }
+        );
+    }
+
+    #[test]
+    fn char_literal_assigned_to_variable() {
+        let tokens = rust_tokens("let c = 'x';");
+        assert_eq!(tokens.len(), 3);
+        assert_eq!(tokens[0].kind, TokenKind::Normal);
+        assert_eq!(
+            tokens[1],
+            Token {
+                start: 8,
+                len: 3,
+                kind: TokenKind::String
+            }
+        );
+        assert_eq!(
+            tokens[2],
+            Token {
+                start: 11,
+                len: 1,
+                kind: TokenKind::Normal
+            }
+        );
+    }
+
+    #[test]
+    fn lifetime_reference_is_not_highlighted() {
+        // `'a` is a lifetime, not a char literal: no closing `'` follows
+        // immediately, so the whole line must stay Normal.
+        let tokens = rust_tokens("&'a str");
+        assert_eq!(
+            tokens.len(),
+            1,
+            "lifetime should not produce a String token"
+        );
+        assert_eq!(tokens[0].kind, TokenKind::Normal);
+        assert_eq!(tokens[0].len, 7);
+    }
+
+    #[test]
+    fn lifetime_in_generic_bound_is_not_highlighted() {
+        let tokens = rust_tokens("fn foo<'a>()");
+        assert_eq!(
+            tokens.len(),
+            1,
+            "lifetime should not produce a String token"
+        );
+        assert_eq!(tokens[0].kind, TokenKind::Normal);
+        assert_eq!(tokens[0].len, 12);
+    }
+
+    #[test]
+    fn char_literal_and_string_coexist_on_one_line() {
+        let tokens = rust_tokens("\"a\" + 'x'");
+        assert_eq!(tokens.len(), 3);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 3,
+                kind: TokenKind::String
+            }
+        );
+        assert_eq!(
+            tokens[1],
+            Token {
+                start: 3,
+                len: 3,
+                kind: TokenKind::Normal
+            }
+        );
+        assert_eq!(
+            tokens[2],
+            Token {
+                start: 6,
+                len: 3,
+                kind: TokenKind::String
+            }
+        );
+    }
+
+    #[test]
+    fn unterminated_char_literal_falls_back_to_normal() {
+        let tokens = rust_tokens("let c = 'x");
+        assert_eq!(
+            tokens.len(),
+            1,
+            "no closing quote: whole line should stay one Normal run"
+        );
+        assert_eq!(tokens[0].kind, TokenKind::Normal);
+        assert_eq!(tokens[0].len, 10);
     }
 
     // ── Edge cases ──────────────────────────────────────────────────

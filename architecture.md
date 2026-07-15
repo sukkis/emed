@@ -152,6 +152,18 @@ found before end of line, the opening `"` is treated as ordinary text instead of
 rest of the line as an incorrectly open-ended string — multi-line strings aren't supported yet
 (see `docs/rust-highlighting.md`).
 
+### Char literals (Rust only, reuse `TokenKind::String`)
+
+A `'` starts a char-literal check via `find_char_literal_end`, which only matches the fixed,
+narrow shape a char literal actually has: one plain character, or one backslash-escaped
+character, immediately followed by a closing `'`. Char literals render with the same
+`TokenKind::String` as strings rather than a separate kind. This fixed-length shape is also
+what disambiguates a char literal from a lifetime (`'a`, `'static`) without needing to
+understand identifiers at all — a lifetime is never followed by a bare `'`, so it simply never
+matches and the `'` is left as ordinary text, same as an unterminated string. Unicode escapes
+(`'\u{1F600}'`) are out of scope, since they aren't fixed-length (see
+`docs/rust-highlighting.md`).
+
 ### Adding a new language
 
 1. Create a new struct (e.g. `CLexer`) in `lexer.rs`.
