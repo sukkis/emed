@@ -189,6 +189,15 @@ impl EditorUi {
                                             Print(ch),
                                         )?;
                                     }
+                                    TokenKind::Comment => {
+                                        queue!(
+                                            self.stdout,
+                                            SetForegroundColor(
+                                                self.theme.comment_fg.to_crossterm()
+                                            ),
+                                            Print(ch),
+                                        )?;
+                                    }
                                     _ => {
                                         queue!(
                                             self.stdout,
@@ -263,6 +272,13 @@ impl EditorUi {
                                     queue!(
                                         self.stdout,
                                         SetForegroundColor(self.theme.string_fg.to_crossterm()),
+                                        Print(ch),
+                                    )?;
+                                }
+                                TokenKind::Comment => {
+                                    queue!(
+                                        self.stdout,
+                                        SetForegroundColor(self.theme.comment_fg.to_crossterm()),
                                         Print(ch),
                                     )?;
                                 }

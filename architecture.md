@@ -164,6 +164,14 @@ matches and the `'` is left as ordinary text, same as an unterminated string. Un
 (`'\u{1F600}'`) are out of scope, since they aren't fixed-length (see
 `docs/rust-highlighting.md`).
 
+### Line comments (Rust only)
+
+A `//` starts a `Comment` token via `is_comment_start`, which consumes everything from there to
+end of line in one bite — no closing delimiter to search for, no escapes, `///` and `//!` need
+no special-casing (they still start with `//`; the extra character is just more comment text).
+Block comments (`/* */`, including Rust's nesting and the multi-line carry-state that requires)
+are a separate, later increment (see `docs/rust-highlighting.md`).
+
 ### Adding a new language
 
 1. Create a new struct (e.g. `CLexer`) in `lexer.rs`.

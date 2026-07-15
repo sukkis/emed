@@ -46,6 +46,7 @@ pub struct Theme {
     pub tilde_fg: ThemeColor,
     pub number_fg: ThemeColor,
     pub string_fg: ThemeColor,
+    pub comment_fg: ThemeColor,
 }
 
 impl Theme {
@@ -68,6 +69,7 @@ impl Theme {
             tilde_fg: ThemeColor::Magenta,
             number_fg: ThemeColor::Yellow,
             string_fg: ThemeColor::DarkGreen,
+            comment_fg: ThemeColor::DarkGrey,
         }
     }
 
@@ -82,6 +84,7 @@ impl Theme {
             tilde_fg: ThemeColor::DarkGreen,
             number_fg: ThemeColor::Yellow,
             string_fg: ThemeColor::DarkGreen,
+            comment_fg: ThemeColor::DarkGrey,
         }
     }
 }

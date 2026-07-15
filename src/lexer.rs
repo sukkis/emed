@@ -120,14 +120,24 @@ fn find_char_literal_end(chars: &[char], start: usize) -> Option<usize> {
     }
 }
 
-/// Does a string, char literal, or number literal start at `chars[i]`?
-/// Shared by the Normal-run scan (stop here) and, individually, by the
-/// main loop's own checks (which branch also needs to know *which* kind
-/// matched, not just whether one did).
+/// A `//` starts a line comment. Unlike strings and char literals, a
+/// comment never needs a closing delimiter to search for — everything
+/// from here to end of line belongs to it, `///` and `//!` included
+/// (they still start with `//`; the extra `/` or `!` is just more comment
+/// text). Block comments (`/* */`) are a separate, later increment.
+fn is_comment_start(chars: &[char], i: usize) -> bool {
+    chars[i] == '/' && chars.get(i + 1) == Some(&'/')
+}
+
+/// Does a string, char literal, number literal, or comment start at
+/// `chars[i]`? Shared by the Normal-run scan (stop here) and,
+/// individually, by the main loop's own checks (which branch also needs
+/// to know *which* kind matched, not just whether one did).
 fn token_starts_at(chars: &[char], i: usize) -> bool {
     (chars[i] == '"' && find_string_end(chars, i).is_some())
         || (chars[i] == '\'' && find_char_literal_end(chars, i).is_some())
         || is_number_start(chars, i)
+        || is_comment_start(chars, i)
 }
 
 /// Tokenize a line using only the universal "number vs. normal" rule.
@@ -223,6 +233,16 @@ impl Lexer for RustLexer {
                     len: i - start,
                     kind: TokenKind::Number,
                 });
+                continue;
+            }
+
+            if is_comment_start(&chars, i) {
+                tokens.push(Token {
+                    start: i,
+                    len: len - i,
+                    kind: TokenKind::Comment,
+                });
+                i = len;
                 continue;
             }
 
@@ -681,6 +701,142 @@ mod tests {
         );
         assert_eq!(tokens[0].kind, TokenKind::Normal);
         assert_eq!(tokens[0].len, 10);
+    }
+
+    // ── Line comments ───────────────────────────────────────────────
+    #[test]
+    fn plain_line_comment_is_single_token() {
+        let tokens = rust_tokens("// hello");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 8,
+                kind: TokenKind::Comment
+            }
+        );
+    }
+
+    #[test]
+    fn bare_double_slash_is_still_a_comment() {
+        let tokens = rust_tokens("//");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 2,
+                kind: TokenKind::Comment
+            }
+        );
+    }
+
+    #[test]
+    fn comment_after_code() {
+        // `let x; // comment` -> Normal("let x; "), Comment("// comment")
+        let tokens = rust_tokens("let x; // comment");
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 7,
+                kind: TokenKind::Normal
+            }
+        );
+        assert_eq!(
+            tokens[1],
+            Token {
+                start: 7,
+                len: 10,
+                kind: TokenKind::Comment
+            }
+        );
+    }
+
+    #[test]
+    fn doc_comment_triple_slash_is_still_comment() {
+        // `///` needs no special-casing: it still starts with `//`, the
+        // extra `/` is just more comment text.
+        let tokens = rust_tokens("/// doc comment");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 15,
+                kind: TokenKind::Comment
+            }
+        );
+    }
+
+    #[test]
+    fn inner_doc_comment_bang_is_still_comment() {
+        let tokens = rust_tokens("//! module doc");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 14,
+                kind: TokenKind::Comment
+            }
+        );
+    }
+
+    #[test]
+    fn single_slash_is_not_a_comment() {
+        // Division, not a comment start: a lone `/` must not match.
+        let tokens = rust_tokens("a / b");
+        assert_eq!(tokens.len(), 1, "a single '/' should not start a comment");
+        assert_eq!(tokens[0].kind, TokenKind::Normal);
+        assert_eq!(tokens[0].len, 5);
+    }
+
+    #[test]
+    fn comment_with_digits_is_not_split_into_a_number_token() {
+        let tokens = rust_tokens("// see issue 42");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 15,
+                kind: TokenKind::Comment
+            }
+        );
+    }
+
+    #[test]
+    fn comment_containing_a_quote_is_not_treated_as_a_string() {
+        let tokens = rust_tokens("// say \"hi\"");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 11,
+                kind: TokenKind::Comment
+            }
+        );
+    }
+
+    #[test]
+    fn string_containing_double_slash_is_not_treated_as_a_comment() {
+        // Regression for the priority-ordered scan: the string check must
+        // consume the whole "http://example.com" literal in one bite, so
+        // the "//" inside it is never visited as a potential comment start.
+        let tokens = rust_tokens("\"http://example.com\"");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 20,
+                kind: TokenKind::String
+            }
+        );
     }
 
     // ── Edge cases ──────────────────────────────────────────────────
