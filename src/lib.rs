@@ -374,7 +374,7 @@ impl EditorState {
             EditorCommand::SaveFile | EditorCommand::PromptSaveAs => ApplyResult::NoChange,
 
             EditorCommand::StartSearch => {
-                self.search_start();
+                self.search_start(Direction::Forward);
                 ApplyResult::Changed
             }
 
@@ -544,9 +544,9 @@ impl EditorState {
     }
 
     /// Begin an incremental search, anchored at the current cursor position.
-    pub fn search_start(&mut self) {
+    pub fn search_start(&mut self, direction: Direction) {
         let origin = self.text.line_to_char(self.cy) + self.cx;
-        self.search = Some(SearchSession::new(origin, Direction::Forward));
+        self.search = Some(SearchSession::new(origin, direction));
     }
 
     /// Re-run the active session's match against the whole buffer and, if it
@@ -584,13 +584,14 @@ impl EditorState {
         self.refresh_search_match();
     }
 
-    /// Move to the next occurrence of the active query, wrapping around
-    /// the buffer if necessary. Does nothing if no search is in progress.
-    pub fn search_repeat(&mut self) {
+    /// Move to the next (or previous, if `direction` is `Backward`)
+    /// occurrence of the active query, wrapping around the buffer if
+    /// necessary. Does nothing if no search is in progress.
+    pub fn search_repeat(&mut self, direction: Direction) {
         let haystack = self.save_to_string();
         let current = self.text.line_to_char(self.cy) + self.cx;
         let next_match = match self.search.as_mut() {
-            Some(session) => session.repeat(&haystack, current, Direction::Forward),
+            Some(session) => session.repeat(&haystack, current, direction),
             None => return,
         };
 
@@ -623,6 +624,14 @@ impl EditorState {
     /// The query typed so far, or `None` if no search is in progress.
     pub fn search_query(&self) -> Option<&str> {
         self.search.as_ref().map(|session| session.query.as_str())
+    }
+
+    /// Whether the active search's query currently has no match. `false`
+    /// when no search is in progress.
+    pub fn is_search_failing(&self) -> bool {
+        self.search
+            .as_ref()
+            .is_some_and(|session| session.is_failing())
     }
 
     /// What the help line at the bottom of the screen should currently

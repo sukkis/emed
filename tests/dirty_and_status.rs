@@ -1,6 +1,7 @@
 // tests to see if setting the "(modified)" in status bar works,
 // and is cleared appropriately
 
+use emed_core::search::Direction;
 use emed_core::{
     ApplyResult, DEFAULT_HELP_MESSAGE, EditorCommand, EditorState, InputKey, QUIT_CONFIRM_COUNT,
     cancels_pending_quit, command_from_key,
@@ -182,7 +183,7 @@ fn status_help_line_shows_save_as_prompt_when_prompting() {
 fn status_help_line_shows_search_query_when_searching() {
     let mut state = EditorState::new((80, 24));
     state.load_document("bind bindings\n", Some("test.txt"));
-    state.search_start();
+    state.search_start(Direction::Forward);
     for c in "bind".chars() {
         state.search_push_char(c);
     }
