@@ -55,7 +55,9 @@ See [architecture.md](architecture.md) for design notes, module layout, and inte
 - [x] Unicode display-width support
 - [x] Incremental search (find), forward only
 - [ ] Reverse incremental search (`C-r`) — jump back through earlier matches
-- [x] Syntax highlighting (number literals; word-boundary aware)
+- [x] Syntax highlighting (number literals only; word-boundary aware) — first slice
+- [ ] Syntax highlighting for Rust (keywords, types, strings, comments, operators) —
+      kilo highlights C; Rust is the equivalent language here
 
 Extras
 
@@ -65,6 +67,8 @@ Extras
 - [x] Soft line wrapping (`visual_line_mode`, word-wrap, toggled with `C-c l`)
 - [x] Syntax highlighting in wrapped mode (same token coloring as unwrapped)
 - [ ] Indent-aware wrap prefix for soft-wrapped lines
+- [ ] Syntax highlighting for Markdown
+- [ ] Syntax highlighting of search matches
 - [ ] Cycle to next theme with a keybinding (e.g. `C-c t`, Emacs-style) — needs a design
       decision first: theme currently lives on `EditorUi`, not `EditorState`, so a
       command-driven toggle needs somewhere testable to track "current theme"
