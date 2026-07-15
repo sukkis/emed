@@ -113,13 +113,19 @@ pub struct SearchSession {
     /// from the origin as the query grows, rather than drifting forward from
     /// wherever the previous (shorter) query happened to match.
     origin: usize,
+    /// Which way the session currently searches. Set at construction and
+    /// flipped by the explicit "search again" action (`repeat`), never by
+    /// typing — typing always re-anchors to `origin` in whichever direction
+    /// is currently active.
+    direction: Direction,
 }
 
 impl SearchSession {
-    pub fn new(origin: usize) -> Self {
+    pub fn new(origin: usize, direction: Direction) -> Self {
         SearchSession {
             query: String::new(),
             origin,
+            direction,
         }
     }
 
@@ -135,13 +141,7 @@ impl SearchSession {
     /// `origin` only — no wraparound. Wrapping is reserved for the explicit
     /// "search again" action (Commit 4's `search_repeat`), not for typing.
     pub fn current_match(&self, haystack: &str) -> Option<usize> {
-        find_from(
-            haystack,
-            &self.query,
-            self.origin,
-            false,
-            Direction::Forward,
-        )
+        find_from(haystack, &self.query, self.origin, false, self.direction)
     }
 
     /// Where the *next* occurrence of the query is, for the explicit
@@ -281,7 +281,7 @@ mod tests {
 
     #[test]
     fn push_char_accumulates_query() {
-        let mut session = SearchSession::new(0);
+        let mut session = SearchSession::new(0, Direction::Forward);
         session.push_char('c');
         session.push_char('a');
         session.push_char('t');
@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn backspace_shrinks_query() {
-        let mut session = SearchSession::new(0);
+        let mut session = SearchSession::new(0, Direction::Forward);
         session.push_char('c');
         session.push_char('a');
         session.push_char('t');
@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn empty_query_has_no_match() {
         // Mirrors find_from's own rule: an empty needle never matches.
-        let session = SearchSession::new(0);
+        let session = SearchSession::new(0, Direction::Forward);
         assert_eq!(session.current_match("hello world"), None);
     }
 
@@ -311,7 +311,7 @@ mod tests {
         // correct implementation must search from `origin`, not from 0 —
         // otherwise every match below would be Some(0) instead of Some(4).
         let haystack = "cat cat";
-        let mut session = SearchSession::new(4);
+        let mut session = SearchSession::new(4, Direction::Forward);
 
         session.push_char('c');
         assert_eq!(session.current_match(haystack), Some(4));
@@ -321,6 +321,25 @@ mod tests {
 
         session.push_char('t');
         assert_eq!(session.current_match(haystack), Some(4));
+    }
+
+    #[test]
+    fn growing_query_refinds_from_origin_not_end_backward() {
+        // "cat cat": origin sits right after the first "cat" (index 3), so a
+        // correct backward implementation must search from `origin`, not
+        // from the end of the buffer — otherwise every match below would be
+        // Some(4) (the second "cat") instead of Some(0).
+        let haystack = "cat cat";
+        let mut session = SearchSession::new(3, Direction::Backward);
+
+        session.push_char('c');
+        assert_eq!(session.current_match(haystack), Some(0));
+
+        session.push_char('a');
+        assert_eq!(session.current_match(haystack), Some(0));
+
+        session.push_char('t');
+        assert_eq!(session.current_match(haystack), Some(0));
     }
 
     // --- SearchSession: repeat_match, for the explicit "search again" action ---
@@ -332,7 +351,7 @@ mod tests {
 
     #[test]
     fn repeat_match_finds_next_occurrence_after_given_position() {
-        let mut session = SearchSession::new(0);
+        let mut session = SearchSession::new(0, Direction::Forward);
         for c in "cat".chars() {
             session.push_char(c);
         }
@@ -342,7 +361,7 @@ mod tests {
 
     #[test]
     fn repeat_match_wraps_to_first_occurrence_when_none_after_position() {
-        let mut session = SearchSession::new(0);
+        let mut session = SearchSession::new(0, Direction::Forward);
         for c in "cat".chars() {
             session.push_char(c);
         }

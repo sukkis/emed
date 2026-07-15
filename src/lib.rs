@@ -3,7 +3,7 @@ pub mod search;
 pub mod wrap;
 use lexer::{Lexer, Token, lexer_for_file_type};
 use ropey::{Rope, RopeSlice};
-use search::SearchSession;
+use search::{Direction, SearchSession};
 use std::path::Path;
 use unicode_width::UnicodeWidthChar;
 
@@ -546,7 +546,7 @@ impl EditorState {
     /// Begin an incremental search, anchored at the current cursor position.
     pub fn search_start(&mut self) {
         let origin = self.text.line_to_char(self.cy) + self.cx;
-        self.search = Some(SearchSession::new(origin));
+        self.search = Some(SearchSession::new(origin, Direction::Forward));
     }
 
     /// Re-run the active session's match against the whole buffer and, if it
