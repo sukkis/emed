@@ -172,18 +172,26 @@ no special-casing (they still start with `//`; the extra character is just more 
 Block comments (`/* */`, including Rust's nesting and the multi-line carry-state that requires)
 are a separate, later increment (see `docs/rust-highlighting.md`).
 
-### Keywords (Rust only)
+### Keywords and primitive types (Rust only)
 
-`find_keyword_end` scans the *whole* identifier-shaped word at a position (letters, digits,
-underscores, left-boundary-checked the same way `is_number_start` checks digits) before
-checking it against the alphabetically-sorted `KEYWORDS` list — checking the full word first,
-rather than matching a prefix, is what keeps "structure" from being misread as containing
-"struct". A non-keyword word isn't treated as a token start at all, so it's absorbed into the
-surrounding `Normal` run exactly as before this increment — no fragmentation cost for ordinary
-identifiers. `KEYWORDS` deliberately excludes primitive/std type names (the separate Types
-increment) and unused-but-reserved words (`abstract`, `become`, …); `true`/`false` are included,
+`scan_word` scans the *whole* identifier-shaped word at a position (letters, digits,
+underscores, left-boundary-checked the same way `is_number_start` checks digits) and returns
+its text — checking the full word first, rather than matching a prefix, is what keeps
+"structure" from being misread as containing "struct", or "boolean" as containing "bool".
+`find_keyword_end` and `find_type_end` both call `scan_word` and differ only in which list they
+check the result against: `KEYWORDS` (alphabetically sorted, so a human can scan and confirm a
+word is or isn't in it) or `PRIMITIVE_TYPES` (kept in Rust's own conventional bit-width order —
+`i8, i16, i32, i64, i128, isize, …` — since that's more human-scannable than strict alphabetical
+for this particular list). A word matching neither isn't treated as a token start at all, so
+it's absorbed into the surrounding `Normal` run exactly as before either increment — no
+fragmentation cost for ordinary identifiers. `KEYWORDS` deliberately excludes primitive/std type
+names and unused-but-reserved words (`abstract`, `become`, …); `true`/`false` are included,
 matching Rust's own grammar, which classifies them as keywords rather than a separate literal
-kind (see `docs/rust-highlighting.md`).
+kind. `PRIMITIVE_TYPES` covers exactly the fixed, exhaustive set of built-in type names
+(`i8`…`i128`, `u8`…`u128`, `isize`, `usize`, `f32`, `f64`, `bool`, `char`, `str`) — std types
+(`String`, `Vec`, `Option`, …) and user-defined types are separate, later increments, since an
+exhaustive list stops being possible once user-defined types are in scope (see
+`docs/rust-highlighting.md`).
 
 ### Adding a new language
 

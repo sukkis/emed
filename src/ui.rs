@@ -207,6 +207,13 @@ impl EditorUi {
                                             Print(ch),
                                         )?;
                                     }
+                                    TokenKind::Type => {
+                                        queue!(
+                                            self.stdout,
+                                            SetForegroundColor(self.theme.type_fg.to_crossterm()),
+                                            Print(ch),
+                                        )?;
+                                    }
                                     _ => {
                                         queue!(
                                             self.stdout,
@@ -295,6 +302,13 @@ impl EditorUi {
                                     queue!(
                                         self.stdout,
                                         SetForegroundColor(self.theme.keyword_fg.to_crossterm()),
+                                        Print(ch),
+                                    )?;
+                                }
+                                TokenKind::Type => {
+                                    queue!(
+                                        self.stdout,
+                                        SetForegroundColor(self.theme.type_fg.to_crossterm()),
                                         Print(ch),
                                     )?;
                                 }

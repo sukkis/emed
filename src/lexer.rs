@@ -12,7 +12,7 @@ pub enum TokenKind {
     /// Language keyword (`fn`, `let`, `if`, `while`, `return`, …).
     Keyword,
     /// Built-in or well-known type (`i32`, `String`, `int`, …).
-    _Type,
+    Type,
     /// String literal (including the quotes).
     String,
     /// Numeric literal (`42`, `3.14`, `0xff`).
@@ -152,18 +152,26 @@ fn is_word_start(chars: &[char], i: usize) -> bool {
         && (i == 0 || !(chars[i - 1].is_alphanumeric() || chars[i - 1] == '_'))
 }
 
+/// Rust's primitive type names. Unlike `KEYWORDS`, kept in Rust's own
+/// conventional bit-width order (`i8, i16, i32, i64, i128, isize`, …)
+/// rather than strict alphabetical — for this specific list, that's the
+/// more human-scannable order (an unrelated-looking `i128` sitting between
+/// `i16` and `isize` would be more surprising than helpful).
+/// See docs/rust-highlighting.md.
+const PRIMITIVE_TYPES: &[&str] = &[
+    "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "f32",
+    "f64", "bool", "char", "str",
+];
+
 /// If a word starts at `chars[start]`, scan it to its full extent (letters,
-/// digits, underscores) and check *that whole word* against `KEYWORDS`.
-/// Scanning the full word first — rather than matching a prefix — is what
-/// keeps "structure" from being misread as containing the keyword
-/// "struct", or "self_ref" as containing "self".
+/// digits, underscores). Scanning the full word first — rather than
+/// matching a prefix — is what keeps "structure" from being misread as
+/// containing the keyword "struct", or "boolean" as containing the
+/// primitive type "bool".
 ///
-/// Returns the exclusive end index of the word if it's a keyword, `None`
-/// otherwise — a non-keyword word is not treated as a token start at all,
-/// so it keeps getting absorbed into the surrounding Normal run exactly
-/// like it was before this increment (no fragmentation cost for ordinary
-/// identifiers).
-fn find_keyword_end(chars: &[char], start: usize) -> Option<usize> {
+/// Returns the exclusive end index and the word's text, or `None` if no
+/// word starts here at all.
+fn scan_word(chars: &[char], start: usize) -> Option<(usize, String)> {
     if !is_word_start(chars, start) {
         return None;
     }
@@ -172,24 +180,46 @@ fn find_keyword_end(chars: &[char], start: usize) -> Option<usize> {
     while j < len && (chars[j].is_alphanumeric() || chars[j] == '_') {
         j += 1;
     }
-    let word: String = chars[start..j].iter().collect();
+    Some((j, chars[start..j].iter().collect()))
+}
+
+/// If a word starts at `chars[start]`, check *that whole word* against
+/// `KEYWORDS`. Returns the exclusive end index if it's a keyword, `None`
+/// otherwise — a non-keyword word is not treated as a token start at all,
+/// so it keeps getting absorbed into the surrounding Normal run exactly
+/// like it was before this increment (no fragmentation cost for ordinary
+/// identifiers).
+fn find_keyword_end(chars: &[char], start: usize) -> Option<usize> {
+    let (end, word) = scan_word(chars, start)?;
     if KEYWORDS.contains(&word.as_str()) {
-        Some(j)
+        Some(end)
     } else {
         None
     }
 }
 
-/// Does a string, char literal, number literal, comment, or keyword start
-/// at `chars[i]`? Shared by the Normal-run scan (stop here) and,
-/// individually, by the main loop's own checks (which branch also needs
-/// to know *which* kind matched, not just whether one did).
+/// Same shape as `find_keyword_end`, checked against `PRIMITIVE_TYPES`
+/// instead.
+fn find_type_end(chars: &[char], start: usize) -> Option<usize> {
+    let (end, word) = scan_word(chars, start)?;
+    if PRIMITIVE_TYPES.contains(&word.as_str()) {
+        Some(end)
+    } else {
+        None
+    }
+}
+
+/// Does a string, char literal, number literal, comment, keyword, or
+/// primitive type start at `chars[i]`? Shared by the Normal-run scan (stop
+/// here) and, individually, by the main loop's own checks (which branch
+/// also needs to know *which* kind matched, not just whether one did).
 fn token_starts_at(chars: &[char], i: usize) -> bool {
     (chars[i] == '"' && find_string_end(chars, i).is_some())
         || (chars[i] == '\'' && find_char_literal_end(chars, i).is_some())
         || is_number_start(chars, i)
         || is_comment_start(chars, i)
         || find_keyword_end(chars, i).is_some()
+        || find_type_end(chars, i).is_some()
 }
 
 /// Tokenize a line using only the universal "number vs. normal" rule.
@@ -312,6 +342,19 @@ impl Lexer for RustLexer {
                 continue;
             }
 
+            // Same "scan the whole word, fall through silently if it
+            // doesn't match" shape as keywords — e.g. "boolean" is never
+            // misread as containing the primitive type "bool".
+            if let Some(end) = find_type_end(&chars, i) {
+                tokens.push(Token {
+                    start: i,
+                    len: end - i,
+                    kind: TokenKind::Type,
+                });
+                i = end;
+                continue;
+            }
+
             let start = i;
             while i < len && !token_starts_at(&chars, i) {
                 i += 1;
@@ -405,7 +448,10 @@ mod tests {
     // ── Word-boundary rule (the u16 corner case) ────────────────────
     #[test]
     fn digits_after_letter_are_not_number() {
-        // "u16" should be entirely Normal — the "16" is part of an identifier.
+        // "u16" is one word, not "u" + Number("16") — the "16" is part of
+        // an identifier. Once primitive types are recognized, that whole
+        // word becomes a single Type token (still never split into a
+        // separate Number sub-token).
         let tokens = rust_tokens("u16");
         assert_eq!(tokens.len(), 1);
         assert_eq!(
@@ -413,7 +459,7 @@ mod tests {
             Token {
                 start: 0,
                 len: 3,
-                kind: TokenKind::Normal
+                kind: TokenKind::Type
             }
         );
     }
@@ -433,14 +479,14 @@ mod tests {
     }
 
     #[test]
-    fn type_names_with_digits_stay_normal() {
+    fn type_names_with_digits_are_recognized_as_types() {
         for name in &["i32", "u64", "f32", "i128"] {
             let tokens = rust_tokens(name);
             assert_eq!(tokens.len(), 1, "{name} should produce a single token");
             assert_eq!(
                 tokens[0].kind,
-                TokenKind::Normal,
-                "{name} should be Normal, not Number"
+                TokenKind::Type,
+                "{name} should be Type, not Number or Normal"
             );
         }
     }
@@ -704,27 +750,30 @@ mod tests {
     #[test]
     fn lifetime_reference_is_not_highlighted() {
         // `'a` is a lifetime, not a char literal: no closing `'` follows
-        // immediately, so the whole line must stay Normal.
-        let tokens = rust_tokens("&'a str");
+        // immediately, so the whole line must stay Normal. Uses a
+        // non-type word ("data") so this test stays decoupled from the
+        // separate Types feature.
+        let tokens = rust_tokens("&'a data");
         assert_eq!(
             tokens.len(),
             1,
             "lifetime should not produce a String token"
         );
         assert_eq!(tokens[0].kind, TokenKind::Normal);
-        assert_eq!(tokens[0].len, 7);
+        assert_eq!(tokens[0].len, 8);
     }
 
     #[test]
     fn lifetime_in_generic_bound_is_not_highlighted() {
-        let tokens = rust_tokens("Vec<&'a str>");
+        // Non-type words ("List", "data") to stay decoupled from Types.
+        let tokens = rust_tokens("List<&'a data>");
         assert_eq!(
             tokens.len(),
             1,
             "lifetime should not produce a String token"
         );
         assert_eq!(tokens[0].kind, TokenKind::Normal);
-        assert_eq!(tokens[0].len, 12);
+        assert_eq!(tokens[0].len, 14);
     }
 
     #[test]
@@ -1069,6 +1118,155 @@ mod tests {
             Token {
                 start: 7,
                 len: 5,
+                kind: TokenKind::Normal
+            }
+        );
+        assert_eq!(
+            tokens[4],
+            Token {
+                start: 12,
+                len: 1,
+                kind: TokenKind::Number
+            }
+        );
+        assert_eq!(
+            tokens[5],
+            Token {
+                start: 13,
+                len: 1,
+                kind: TokenKind::Normal
+            }
+        );
+    }
+
+    // ── Primitive types ─────────────────────────────────────────────
+    #[test]
+    fn plain_primitive_type_is_single_token() {
+        let tokens = rust_tokens("str");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 3,
+                kind: TokenKind::Type
+            }
+        );
+    }
+
+    #[test]
+    fn primitive_type_followed_by_text() {
+        // `usize count` -> Type("usize"), Normal(" count")
+        let tokens = rust_tokens("usize count");
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 5,
+                kind: TokenKind::Type
+            }
+        );
+        assert_eq!(
+            tokens[1],
+            Token {
+                start: 5,
+                len: 6,
+                kind: TokenKind::Normal
+            }
+        );
+    }
+
+    #[test]
+    fn word_with_primitive_type_as_prefix_is_not_split() {
+        // "boolean" must not be misread as containing the primitive type
+        // "bool" — the scan grabs the whole word before checking.
+        let tokens = rust_tokens("boolean");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 7,
+                kind: TokenKind::Normal
+            }
+        );
+    }
+
+    #[test]
+    fn char_type_is_not_confused_with_a_char_literal() {
+        // `x: char = 'a'` -> Normal("x: "), Type("char"), Normal(" = "), String("'a'")
+        let tokens = rust_tokens("x: char = 'a'");
+        assert_eq!(tokens.len(), 4);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 3,
+                kind: TokenKind::Normal
+            }
+        );
+        assert_eq!(
+            tokens[1],
+            Token {
+                start: 3,
+                len: 4,
+                kind: TokenKind::Type
+            }
+        );
+        assert_eq!(
+            tokens[2],
+            Token {
+                start: 7,
+                len: 3,
+                kind: TokenKind::Normal
+            }
+        );
+        assert_eq!(
+            tokens[3],
+            Token {
+                start: 10,
+                len: 3,
+                kind: TokenKind::String
+            }
+        );
+    }
+
+    #[test]
+    fn keyword_type_and_number_compose_on_one_line() {
+        // `let v: u8 = 5;` -> Keyword("let"), Normal(" v: "), Type("u8"),
+        // Normal(" = "), Number("5"), Normal(";")
+        let tokens = rust_tokens("let v: u8 = 5;");
+        assert_eq!(tokens.len(), 6);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 3,
+                kind: TokenKind::Keyword
+            }
+        );
+        assert_eq!(
+            tokens[1],
+            Token {
+                start: 3,
+                len: 4,
+                kind: TokenKind::Normal
+            }
+        );
+        assert_eq!(
+            tokens[2],
+            Token {
+                start: 7,
+                len: 2,
+                kind: TokenKind::Type
+            }
+        );
+        assert_eq!(
+            tokens[3],
+            Token {
+                start: 9,
+                len: 3,
                 kind: TokenKind::Normal
             }
         );
