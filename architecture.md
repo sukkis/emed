@@ -124,8 +124,7 @@ Syntax highlighting is implemented as a simple per-line lexer pipeline:
    which a baseline numbers-first pass would get wrong. Shared rules (number-literal detection
    with word-boundary awareness, string-literal boundary detection with backslash-escapes) live
    in free functions (`is_number_start`, `find_string_end`) called from within that scan.
-   `PlainLexer` still just calls `tokenize_numbers()` (no strings). See
-   `docs/rust-highlighting.md` for the full design rationale and increment plan.
+   `PlainLexer` still just calls `tokenize_numbers()` (no strings).
 
 3. **Caching** — `EditorState` maintains a `token_cache: Vec<Vec<Token>>` with one entry per
    line. `tokens_for_line(i)` tokenizes on first access and returns the cached result.
@@ -149,8 +148,7 @@ A `"` starts a string token; `find_string_end` scans forward for the matching cl
 treating `\` as always consuming itself plus the next character (so `\"` and `\\` are handled
 correctly without needing to know Rust's actual escape-sequence set). If no closing quote is
 found before end of line, the opening `"` is treated as ordinary text instead of coloring the
-rest of the line as an incorrectly open-ended string — multi-line strings aren't supported yet
-(see `docs/rust-highlighting.md`).
+rest of the line as an incorrectly open-ended string — multi-line strings aren't supported yet.
 
 ### Char literals (Rust only, reuse `TokenKind::String`)
 
@@ -161,8 +159,7 @@ character, immediately followed by a closing `'`. Char literals render with the 
 what disambiguates a char literal from a lifetime (`'a`, `'static`) without needing to
 understand identifiers at all — a lifetime is never followed by a bare `'`, so it simply never
 matches and the `'` is left as ordinary text, same as an unterminated string. Unicode escapes
-(`'\u{1F600}'`) are out of scope, since they aren't fixed-length (see
-`docs/rust-highlighting.md`).
+(`'\u{1F600}'`) are out of scope, since they aren't fixed-length.
 
 ### Line comments (Rust only)
 
@@ -170,7 +167,9 @@ A `//` starts a `Comment` token via `is_comment_start`, which consumes everythin
 end of line in one bite — no closing delimiter to search for, no escapes, `///` and `//!` need
 no special-casing (they still start with `//`; the extra character is just more comment text).
 Block comments (`/* */`, including Rust's nesting and the multi-line carry-state that requires)
-are a separate, later increment (see `docs/rust-highlighting.md`).
+are a separate, later increment: nesting means the carry-state can't just be a bool (needs a
+depth counter), and multi-line support means `EditorState`'s per-line token cache needs to
+thread state between lines — currently every line is tokenized in total isolation.
 
 ### Keywords and primitive types (Rust only)
 
@@ -190,8 +189,7 @@ matching Rust's own grammar, which classifies them as keywords rather than a sep
 kind. `PRIMITIVE_TYPES` covers exactly the fixed, exhaustive set of built-in type names
 (`i8`…`i128`, `u8`…`u128`, `isize`, `usize`, `f32`, `f64`, `bool`, `char`, `str`) — std types
 (`String`, `Vec`, `Option`, …) and user-defined types are separate, later increments, since an
-exhaustive list stops being possible once user-defined types are in scope (see
-`docs/rust-highlighting.md`).
+exhaustive list stops being possible once user-defined types are in scope.
 
 ### Adding a new language
 

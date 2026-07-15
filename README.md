@@ -58,8 +58,10 @@ See [architecture.md](architecture.md) for design notes, module layout, and inte
 - [x] Incremental search (find), forward only
 - [x] Reverse incremental search (`C-r`) — jump back through earlier matches
 - [x] Syntax highlighting (number literals only; word-boundary aware) — first slice
-- [ ] Syntax highlighting for Rust (keywords, types, strings, comments, operators) —
-      kilo highlights C; Rust is the equivalent language here
+- [ ] Syntax highlighting for Rust (kilo highlights C; Rust is the equivalent language
+      here) — string literals, char literals, line comments, keywords, and primitive
+      types done; still pending: std/user-defined types, traits, block comments
+      (`/* */`, including multi-line + nesting), and operators
 
 Extras
 
