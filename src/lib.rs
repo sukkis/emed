@@ -586,11 +586,10 @@ impl EditorState {
     /// Move to the next occurrence of the active query, wrapping around
     /// the buffer if necessary. Does nothing if no search is in progress.
     pub fn search_repeat(&mut self) {
-        let next_match = match self.search.as_ref() {
-            Some(session) => {
-                let current = self.text.line_to_char(self.cy) + self.cx;
-                session.repeat_match(&self.save_to_string(), current)
-            }
+        let haystack = self.save_to_string();
+        let current = self.text.line_to_char(self.cy) + self.cx;
+        let next_match = match self.search.as_mut() {
+            Some(session) => session.repeat(&haystack, current, Direction::Forward),
             None => return,
         };
 

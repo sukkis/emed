@@ -144,14 +144,23 @@ impl SearchSession {
         find_from(haystack, &self.query, self.origin, false, self.direction)
     }
 
-    /// Where the *next* occurrence of the query is, for the explicit
-    /// "search again" action. `after` is the position the cursor is
-    /// already at (the match `current_match` previously found) — the
-    /// search starts at `after + 1`, not `after`, so this never
-    /// re-reports the match already sitting under the cursor. Wraps
-    /// around the buffer if nothing is found before the end.
-    pub fn repeat_match(&self, haystack: &str, after: usize) -> Option<usize> {
-        find_from(haystack, &self.query, after + 1, true, Direction::Forward)
+    /// Move to the next (or previous, if `direction` is `Backward`)
+    /// occurrence of the query for the explicit "search again" action, and
+    /// record `direction` as the session's new direction — this is what
+    /// lets C-s/C-r flip an active session's direction mid-search.
+    ///
+    /// `after` is the position the cursor is already at (the match
+    /// `current_match` or a previous `repeat` found) — forward search
+    /// starts at `after + 1`, backward search starts at `after`, so this
+    /// never re-reports the match already sitting under the cursor. Wraps
+    /// around the buffer if nothing is found on the way to the end/start.
+    pub fn repeat(&mut self, haystack: &str, after: usize, direction: Direction) -> Option<usize> {
+        self.direction = direction;
+        let start = match direction {
+            Direction::Forward => after + 1,
+            Direction::Backward => after,
+        };
+        find_from(haystack, &self.query, start, true, direction)
     }
 
     /// The char index the search began at — used to restore the cursor if
@@ -342,30 +351,90 @@ mod tests {
         assert_eq!(session.current_match(haystack), Some(0));
     }
 
-    // --- SearchSession: repeat_match, for the explicit "search again" action ---
+    // --- SearchSession: repeat(direction), for the explicit "search again" action ---
     //
     // `after` is where the cursor already is (the match `current_match`
-    // already found and jumped to). `repeat_match` finds the *next* one
+    // already found and jumped to). Forward `repeat` finds the *next* one
     // past that — never `after` itself — which is why the first case below
     // is asked to move from 0 to 4, not confirm 0 again.
 
     #[test]
-    fn repeat_match_finds_next_occurrence_after_given_position() {
+    fn repeat_forward_finds_next_occurrence_after_given_position() {
         let mut session = SearchSession::new(0, Direction::Forward);
         for c in "cat".chars() {
             session.push_char(c);
         }
         // "cat cat cat": occurrences at 0, 4, 8. Already at 0, next is 4.
-        assert_eq!(session.repeat_match("cat cat cat", 0), Some(4));
+        assert_eq!(
+            session.repeat("cat cat cat", 0, Direction::Forward),
+            Some(4)
+        );
     }
 
     #[test]
-    fn repeat_match_wraps_to_first_occurrence_when_none_after_position() {
+    fn repeat_forward_wraps_to_first_occurrence_when_none_after_position() {
         let mut session = SearchSession::new(0, Direction::Forward);
         for c in "cat".chars() {
             session.push_char(c);
         }
         // Already at the last occurrence (8); nothing follows, so it wraps.
-        assert_eq!(session.repeat_match("cat cat cat", 8), Some(0));
+        assert_eq!(
+            session.repeat("cat cat cat", 8, Direction::Forward),
+            Some(0)
+        );
+    }
+
+    // --- SearchSession: repeat(direction), replacing repeat_match ---
+    //
+    // `repeat` both performs the step *and* records the direction it was
+    // asked to search in, which is what lets C-s/C-r flip an active
+    // session's direction mid-search.
+
+    #[test]
+    fn repeat_backward_finds_previous_occurrence_before_given_position() {
+        let mut session = SearchSession::new(0, Direction::Forward);
+        for c in "cat".chars() {
+            session.push_char(c);
+        }
+        // "cat cat cat": occurrences at 0, 4, 8. Already at 8, previous is 4.
+        assert_eq!(
+            session.repeat("cat cat cat", 8, Direction::Backward),
+            Some(4)
+        );
+    }
+
+    #[test]
+    fn repeat_backward_wraps_to_last_occurrence_when_none_before_position() {
+        let mut session = SearchSession::new(0, Direction::Forward);
+        for c in "cat".chars() {
+            session.push_char(c);
+        }
+        // Already at the first occurrence (0); nothing precedes it, so it
+        // wraps to the last occurrence (8).
+        assert_eq!(
+            session.repeat("cat cat cat", 0, Direction::Backward),
+            Some(8)
+        );
+    }
+
+    #[test]
+    fn repeat_flips_direction_and_steps_from_current_position_not_origin() {
+        // Mirrors docs/search-reverse.md decision 3: flipping direction
+        // steps from wherever the cursor currently is, not back to origin.
+        let haystack = "cat cat cat";
+        let mut session = SearchSession::new(0, Direction::Forward);
+        for c in "cat".chars() {
+            session.push_char(c);
+        }
+
+        // Walk forward twice: 0 -> 4 -> 8.
+        assert_eq!(session.repeat(haystack, 0, Direction::Forward), Some(4));
+        assert_eq!(session.repeat(haystack, 4, Direction::Forward), Some(8));
+
+        // Flip to backward from the current position (8), not origin (0):
+        // steps back to 4, then to 0 — not a re-jump to some origin-relative
+        // match.
+        assert_eq!(session.repeat(haystack, 8, Direction::Backward), Some(4));
+        assert_eq!(session.repeat(haystack, 4, Direction::Backward), Some(0));
     }
 }
