@@ -14,7 +14,7 @@ pub enum TokenKind {
     /// Built-in or well-known type (`i32`, `String`, `int`, …).
     _Type,
     /// String literal (including the quotes).
-    _String,
+    String,
     /// Numeric literal (`42`, `3.14`, `0xff`).
     Number,
     /// Comment (line or block).
@@ -26,7 +26,9 @@ pub enum TokenKind {
 /// One coloured span within a line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
-    /// Byte offset of the first character within the line.
+    /// Char index (not byte offset) of the first character within the line —
+    /// lines are tokenized over `Vec<char>`, so multi-byte characters are
+    /// always whole positions, never split mid-character.
     pub start: usize,
     /// Number of characters this token spans.
     pub len: usize,
@@ -64,6 +66,29 @@ pub struct PlainLexer;
 fn is_number_start(chars: &[char], i: usize) -> bool {
     chars[i].is_ascii_digit()
         && (i == 0 || !(chars[i - 1].is_ascii_alphanumeric() || chars[i - 1] == '_'))
+}
+
+/// If `chars[start]` is an opening `"`, find the index of the matching
+/// closing `"` on this same line, honoring backslash-escapes (a `\` always
+/// consumes itself plus the following character, whatever it is — this
+/// correctly skips `\"` and `\\` without needing to know Rust's actual
+/// escape-sequence set).
+///
+/// Returns `None` if no closing quote is found before end of line — the
+/// caller then treats the opening `"` as ordinary text rather than
+/// colour the rest of the line as an incorrectly open-ended string
+/// (single-line-only strings; see docs/rust-highlighting.md).
+fn find_string_end(chars: &[char], start: usize) -> Option<usize> {
+    let len = chars.len();
+    let mut j = start + 1;
+    while j < len {
+        match chars[j] {
+            '\\' => j += 2,
+            '"' => return Some(j),
+            _ => j += 1,
+        }
+    }
+    None
 }
 
 /// Tokenize a line using only the universal "number vs. normal" rule.
@@ -108,10 +133,60 @@ fn tokenize_numbers(line: &str) -> Vec<Token> {
 
 impl Lexer for RustLexer {
     fn tokenize_line(&self, line: &str, _in_comment: bool) -> (Vec<Token>, bool) {
-        // For now, Rust only highlights numbers.
-        // Later: call tokenize_numbers, then refine Normal spans
-        // into keywords, types, strings, comments, etc.
-        (tokenize_numbers(line), false)
+        // Single-pass, priority-ordered scan: at each position, check for a
+        // string start before a number start, so a token is never created
+        // wrong in the first place (e.g. digits inside a string literal
+        // must never become a separate Number token). Later categories
+        // (comments, keywords, operators) slot into this same ordered scan.
+        let chars: Vec<char> = line.chars().collect();
+        let len = chars.len();
+        let mut tokens = Vec::new();
+        let mut i = 0;
+
+        while i < len {
+            // Unterminated (find_string_end returns None): falls through and
+            // treats the quote as ordinary text, absorbed into the
+            // surrounding Normal run.
+            if chars[i] == '"'
+                && let Some(end) = find_string_end(&chars, i)
+            {
+                tokens.push(Token {
+                    start: i,
+                    len: end - i + 1,
+                    kind: TokenKind::String,
+                });
+                i = end + 1;
+                continue;
+            }
+
+            if is_number_start(&chars, i) {
+                let start = i;
+                while i < len && chars[i].is_ascii_digit() {
+                    i += 1;
+                }
+                tokens.push(Token {
+                    start,
+                    len: i - start,
+                    kind: TokenKind::Number,
+                });
+                continue;
+            }
+
+            let start = i;
+            while i < len
+                && !(chars[i] == '"' && find_string_end(&chars, i).is_some())
+                && !is_number_start(&chars, i)
+            {
+                i += 1;
+            }
+            tokens.push(Token {
+                start,
+                len: i - start,
+                kind: TokenKind::Normal,
+            });
+        }
+
+        (tokens, false)
     }
 }
 
@@ -256,6 +331,154 @@ mod tests {
                 .iter()
                 .any(|t| t.kind == TokenKind::Number && t.start == 4 && t.len == 2),
             "42 inside parens should be a Number token"
+        );
+    }
+
+    // ── String literals ─────────────────────────────────────────────
+    #[test]
+    fn plain_string_is_single_token() {
+        let tokens = rust_tokens("\"hello\"");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 7,
+                kind: TokenKind::String
+            }
+        );
+    }
+
+    #[test]
+    fn two_strings_separated_by_normal_text() {
+        // `"hello" + "world"` → String, Normal(" + "), String
+        let tokens = rust_tokens("\"hello\" + \"world\"");
+        assert_eq!(tokens.len(), 3);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 7,
+                kind: TokenKind::String
+            }
+        );
+        assert_eq!(
+            tokens[1],
+            Token {
+                start: 7,
+                len: 3,
+                kind: TokenKind::Normal
+            }
+        );
+        assert_eq!(
+            tokens[2],
+            Token {
+                start: 10,
+                len: 7,
+                kind: TokenKind::String
+            }
+        );
+    }
+
+    #[test]
+    fn string_assigned_to_variable() {
+        // `let s = "hi";` → Normal("let s = "), String("\"hi\""), Normal(";")
+        let tokens = rust_tokens("let s = \"hi\";");
+        assert_eq!(tokens.len(), 3);
+        assert_eq!(tokens[0].kind, TokenKind::Normal);
+        assert_eq!(
+            tokens[1],
+            Token {
+                start: 8,
+                len: 4,
+                kind: TokenKind::String
+            }
+        );
+        assert_eq!(
+            tokens[2],
+            Token {
+                start: 12,
+                len: 1,
+                kind: TokenKind::Normal
+            }
+        );
+    }
+
+    #[test]
+    fn empty_string_is_still_a_token() {
+        let tokens = rust_tokens("\"\"");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 2,
+                kind: TokenKind::String
+            }
+        );
+    }
+
+    #[test]
+    fn escaped_quote_does_not_end_string() {
+        // Target text: "say \"hi\""  (one String token, quotes and all)
+        let tokens = rust_tokens("\"say \\\"hi\\\"\"");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 12,
+                kind: TokenKind::String
+            }
+        );
+    }
+
+    #[test]
+    fn escaped_backslash_does_not_escape_the_next_char() {
+        // Target text: "back\\slash" — the escaped backslash must not also
+        // consume the following char, and must not prevent the real
+        // closing quote from being recognized.
+        let tokens = rust_tokens("\"back\\\\slash\"");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 13,
+                kind: TokenKind::String
+            }
+        );
+    }
+
+    #[test]
+    fn unterminated_string_falls_back_to_normal() {
+        // No closing quote before end of line: per the multi-line-strings
+        // deferral, the whole line stays Normal rather than being colored
+        // as an (incorrectly) open-ended String.
+        let tokens = rust_tokens("let s = \"unterminated");
+        assert_eq!(
+            tokens.len(),
+            1,
+            "no closing quote: whole line should stay one Normal run"
+        );
+        assert_eq!(tokens[0].kind, TokenKind::Normal);
+        assert_eq!(tokens[0].len, 21);
+    }
+
+    #[test]
+    fn digits_inside_string_are_not_split_into_a_number_token() {
+        // Regression test for the single-pass, priority-ordered rewrite:
+        // the string check must win over the number check, so "42" inside
+        // a string is never split out as its own Number token.
+        let tokens = rust_tokens("\"room 42\"");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            tokens[0],
+            Token {
+                start: 0,
+                len: 9,
+                kind: TokenKind::String
+            }
         );
     }
 

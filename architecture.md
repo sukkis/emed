@@ -116,8 +116,16 @@ Syntax highlighting is implemented as a simple per-line lexer pipeline:
    no file also gets a `PlainLexer` so that number literals are highlighted immediately.
 
 2. **Tokenization** — each `Lexer` implements `tokenize_line(line, in_comment) → (Vec<Token>, bool)`.
-   Shared rules (like number-literal detection with word-boundary awareness) live in free
-   functions (`is_number_start`, `tokenize_numbers`) so every language lexer can reuse them.
+   `RustLexer` scans a line once, char by char, checking "does a token start here?" in
+   priority order at each position (string start before number start) and consuming the
+   whole token in one bite when matched — rather than running a baseline pass over the whole
+   line and refining it afterward. This matters because refine-after-the-fact can't be undone
+   cleanly: e.g. digits inside a string literal must never become a separate `Number` token,
+   which a baseline numbers-first pass would get wrong. Shared rules (number-literal detection
+   with word-boundary awareness, string-literal boundary detection with backslash-escapes) live
+   in free functions (`is_number_start`, `find_string_end`) called from within that scan.
+   `PlainLexer` still just calls `tokenize_numbers()` (no strings). See
+   `docs/rust-highlighting.md` for the full design rationale and increment plan.
 
 3. **Caching** — `EditorState` maintains a `token_cache: Vec<Vec<Token>>` with one entry per
    line. `tokens_for_line(i)` tokenizes on first access and returns the cached result.
@@ -125,7 +133,8 @@ Syntax highlighting is implemented as a simple per-line lexer pipeline:
 
 4. **Rendering** — `draw_screen()` walks each visible character, looks up which token it
    belongs to, and sets the foreground colour accordingly (e.g. `number_fg` for `Number`
-   tokens). Characters that don't match any token fall back to the theme's default foreground.
+   tokens, `string_fg` for `String` tokens). Characters that don't match any token fall back
+   to the theme's default foreground.
 
 ### Word-boundary rule
 
@@ -134,11 +143,21 @@ underscore. This prevents the "16" in `u16` or the "32" in `my_var32` from being
 as numbers — they're part of an identifier. Standalone literals like `42`, `(123)`, and
 `x + 7` are highlighted correctly.
 
+### String literals (Rust only, single-line)
+
+A `"` starts a string token; `find_string_end` scans forward for the matching closing `"`,
+treating `\` as always consuming itself plus the next character (so `\"` and `\\` are handled
+correctly without needing to know Rust's actual escape-sequence set). If no closing quote is
+found before end of line, the opening `"` is treated as ordinary text instead of coloring the
+rest of the line as an incorrectly open-ended string — multi-line strings aren't supported yet
+(see `docs/rust-highlighting.md`).
+
 ### Adding a new language
 
 1. Create a new struct (e.g. `CLexer`) in `lexer.rs`.
-2. Implement the `Lexer` trait — call `tokenize_numbers()` as a baseline, then refine
-   `Normal` spans into keywords, types, strings, comments, etc.
+2. Implement the `Lexer` trait as a single char-by-char scan, checking token-start conditions
+   in priority order at each position (see `RustLexer::tokenize_line`), rather than a baseline
+   pass over the whole line refined afterward.
 3. Add a match arm in `lexer_for_file_type()`.
 4. Add the file extension in `file_type_from_filename()` in `lib.rs`.
 
