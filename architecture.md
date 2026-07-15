@@ -116,8 +116,15 @@ Syntax highlighting is implemented as a simple per-line lexer pipeline:
    no file also gets a `PlainLexer` so that number literals are highlighted immediately.
 
 2. **Tokenization** — each `Lexer` implements `tokenize_line(line, in_comment) → (Vec<Token>, bool)`.
-   Shared rules (like number-literal detection with word-boundary awareness) live in free
-   functions (`is_number_start`, `tokenize_numbers`) so every language lexer can reuse them.
+   `RustLexer` scans a line once, char by char, checking "does a token start here?" in
+   priority order at each position (string start before number start) and consuming the
+   whole token in one bite when matched — rather than running a baseline pass over the whole
+   line and refining it afterward. This matters because refine-after-the-fact can't be undone
+   cleanly: e.g. digits inside a string literal must never become a separate `Number` token,
+   which a baseline numbers-first pass would get wrong. Shared rules (number-literal detection
+   with word-boundary awareness, string-literal boundary detection with backslash-escapes) live
+   in free functions (`is_number_start`, `find_string_end`) called from within that scan.
+   `PlainLexer` still just calls `tokenize_numbers()` (no strings).
 
 3. **Caching** — `EditorState` maintains a `token_cache: Vec<Vec<Token>>` with one entry per
    line. `tokens_for_line(i)` tokenizes on first access and returns the cached result.
@@ -125,7 +132,8 @@ Syntax highlighting is implemented as a simple per-line lexer pipeline:
 
 4. **Rendering** — `draw_screen()` walks each visible character, looks up which token it
    belongs to, and sets the foreground colour accordingly (e.g. `number_fg` for `Number`
-   tokens). Characters that don't match any token fall back to the theme's default foreground.
+   tokens, `string_fg` for `String` tokens). Characters that don't match any token fall back
+   to the theme's default foreground.
 
 ### Word-boundary rule
 
@@ -134,11 +142,61 @@ underscore. This prevents the "16" in `u16` or the "32" in `my_var32` from being
 as numbers — they're part of an identifier. Standalone literals like `42`, `(123)`, and
 `x + 7` are highlighted correctly.
 
+### String literals (Rust only, single-line)
+
+A `"` starts a string token; `find_string_end` scans forward for the matching closing `"`,
+treating `\` as always consuming itself plus the next character (so `\"` and `\\` are handled
+correctly without needing to know Rust's actual escape-sequence set). If no closing quote is
+found before end of line, the opening `"` is treated as ordinary text instead of coloring the
+rest of the line as an incorrectly open-ended string — multi-line strings aren't supported yet.
+
+### Char literals (Rust only, reuse `TokenKind::String`)
+
+A `'` starts a char-literal check via `find_char_literal_end`, which only matches the fixed,
+narrow shape a char literal actually has: one plain character, or one backslash-escaped
+character, immediately followed by a closing `'`. Char literals render with the same
+`TokenKind::String` as strings rather than a separate kind. This fixed-length shape is also
+what disambiguates a char literal from a lifetime (`'a`, `'static`) without needing to
+understand identifiers at all — a lifetime is never followed by a bare `'`, so it simply never
+matches and the `'` is left as ordinary text, same as an unterminated string. Unicode escapes
+(`'\u{1F600}'`) are out of scope, since they aren't fixed-length.
+
+### Line comments (Rust only)
+
+A `//` starts a `Comment` token via `is_comment_start`, which consumes everything from there to
+end of line in one bite — no closing delimiter to search for, no escapes, `///` and `//!` need
+no special-casing (they still start with `//`; the extra character is just more comment text).
+Block comments (`/* */`, including Rust's nesting and the multi-line carry-state that requires)
+are a separate, later increment: nesting means the carry-state can't just be a bool (needs a
+depth counter), and multi-line support means `EditorState`'s per-line token cache needs to
+thread state between lines — currently every line is tokenized in total isolation.
+
+### Keywords and primitive types (Rust only)
+
+`scan_word` scans the *whole* identifier-shaped word at a position (letters, digits,
+underscores, left-boundary-checked the same way `is_number_start` checks digits) and returns
+its text — checking the full word first, rather than matching a prefix, is what keeps
+"structure" from being misread as containing "struct", or "boolean" as containing "bool".
+`find_keyword_end` and `find_type_end` both call `scan_word` and differ only in which list they
+check the result against: `KEYWORDS` (alphabetically sorted, so a human can scan and confirm a
+word is or isn't in it) or `PRIMITIVE_TYPES` (kept in Rust's own conventional bit-width order —
+`i8, i16, i32, i64, i128, isize, …` — since that's more human-scannable than strict alphabetical
+for this particular list). A word matching neither isn't treated as a token start at all, so
+it's absorbed into the surrounding `Normal` run exactly as before either increment — no
+fragmentation cost for ordinary identifiers. `KEYWORDS` deliberately excludes primitive/std type
+names and unused-but-reserved words (`abstract`, `become`, …); `true`/`false` are included,
+matching Rust's own grammar, which classifies them as keywords rather than a separate literal
+kind. `PRIMITIVE_TYPES` covers exactly the fixed, exhaustive set of built-in type names
+(`i8`…`i128`, `u8`…`u128`, `isize`, `usize`, `f32`, `f64`, `bool`, `char`, `str`) — std types
+(`String`, `Vec`, `Option`, …) and user-defined types are separate, later increments, since an
+exhaustive list stops being possible once user-defined types are in scope.
+
 ### Adding a new language
 
 1. Create a new struct (e.g. `CLexer`) in `lexer.rs`.
-2. Implement the `Lexer` trait — call `tokenize_numbers()` as a baseline, then refine
-   `Normal` spans into keywords, types, strings, comments, etc.
+2. Implement the `Lexer` trait as a single char-by-char scan, checking token-start conditions
+   in priority order at each position (see `RustLexer::tokenize_line`), rather than a baseline
+   pass over the whole line refined afterward.
 3. Add a match arm in `lexer_for_file_type()`.
 4. Add the file extension in `file_type_from_filename()` in `lib.rs`.
 

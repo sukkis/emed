@@ -21,6 +21,14 @@ additive and specific to how we work in *this* project.
   parent `CLAUDE.md`'s requirement to stop after phase 1 (failing test)
   is one instance of this; it applies at every increment boundary, not
   only there.
+- **An increment isn't finished until the docs it affects say the same
+  thing the code now does.** This includes doc comments (e.g. a struct
+  field comment that described the old behavior), `architecture.md`,
+  `README.md`, and any `docs/*.md` design doc the increment was scoped
+  from. If the increment changed an API, a design decision, or introduced
+  a known shortcut/gap, that update happens in the same increment, not
+  filed away as future cleanup — stale docs are exactly the kind of thing
+  that makes a future session reconstruct the wrong *why*.
 
 ## Explain and Discuss
 - Before introducing anything new to the codebase — a crate, a Rust
@@ -45,6 +53,8 @@ additive and specific to how we work in *this* project.
 2. Write the failing test only. Stop. Explain what it checks and why.
 3. Wait for the user to run it and confirm the failure.
 4. Implement minimally. Stop. Walk through the implementation.
-5. Run the full suite, confirm green.
+5. Run the full suite, confirm green. Update any doc comments,
+   `architecture.md`, `README.md`, or `docs/*.md` entries this increment
+   made stale or incomplete.
 6. Stop. Discuss what's next, and what was deferred and why, before
    starting another increment.

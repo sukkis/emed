@@ -1,10 +1,8 @@
 //! Integration tests for incremental search, driven entirely through
-//! `EditorState` — no terminal, no keybindings (those come later).
-//!
-//! Commit 4a scope only: `search_start`, `search_push_char`,
-//! `search_backspace`, `is_searching`, `search_query`. No `search_repeat`
-//! (needs `last_match`, added in 4b) and no `search_accept`/`search_cancel`
-//! (4c) yet.
+//! `EditorState` — no terminal, no keybindings (those come later, and are
+//! covered instead by `tests/input_translation.rs` and manual verification;
+//! see `architecture.md`'s "Incremental search" section for the full
+//! layering).
 
 use emed_core::search::Direction;
 use emed_core::{ApplyResult, EditorCommand, EditorState};
